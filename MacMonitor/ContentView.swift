@@ -109,6 +109,42 @@ struct ContentView: View {
                     gradient: tempGradient(monitor.cpuTemp)
                 )
             }
+            // Network stats row
+            HStack(spacing: 0) {
+                // Download
+                HStack(spacing: 4) {
+                    Image(systemName: "arrow.down.circle.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(tc.accent.opacity(0.7))
+                    Text(formatSpeed(monitor.downloadSpeed))
+                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.7))
+                }
+                .frame(maxWidth: .infinity)
+
+                // Ping
+                HStack(spacing: 4) {
+                    Image(systemName: "network")
+                        .font(.system(size: 11))
+                        .foregroundStyle(pingColor(monitor.ping).opacity(0.7))
+                    Text(monitor.ping < 0 ? "—" : String(format: "%.0fms", monitor.ping))
+                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.7))
+                }
+                .frame(maxWidth: .infinity)
+
+                // Upload
+                HStack(spacing: 4) {
+                    Image(systemName: "arrow.up.circle.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(tc.accent.opacity(0.7))
+                    Text(formatSpeed(monitor.uploadSpeed))
+                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.7))
+                }
+                .frame(maxWidth: .infinity)
+            }
+            .padding(.horizontal, 4)
         }
         .padding(20)
     }
@@ -168,6 +204,20 @@ struct ContentView: View {
 
     func formatMB(_ mb: Double) -> String {
         mb >= 1024 ? String(format: "%.1f GB", mb / 1024) : String(format: "%.0f MB", mb)
+    }
+
+    // KB/s value → formatted string
+    func formatSpeed(_ kbps: Double) -> String {
+        if kbps < 1 { return "0 K/s" }
+        if kbps >= 1024 { return String(format: "%.1f M/s", kbps / 1024) }
+        return String(format: "%.0f K/s", kbps)
+    }
+
+    func pingColor(_ ms: Double) -> Color {
+        if ms < 0 { return .gray }
+        if ms < 50 { return .green }
+        if ms < 100 { return .yellow }
+        return .orange
     }
 }
 

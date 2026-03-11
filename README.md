@@ -1,6 +1,6 @@
 # MacMonitor
 
-A lightweight, native macOS desktop widget that displays real-time system metrics — CPU, Memory, Disk, and Temperature — right on your desktop.
+A lightweight, native macOS desktop widget that displays real-time system metrics — CPU, Memory, Disk, Temperature, and Network — right on your desktop.
 
 ![macOS 13+](https://img.shields.io/badge/macOS-13%2B-blue)
 ![Swift 5.9](https://img.shields.io/badge/Swift-5.9-orange)
@@ -9,13 +9,14 @@ A lightweight, native macOS desktop widget that displays real-time system metric
 
 ## Features
 
-- **2×2 Circular Gauges** — CPU, Memory, Disk, and Temperature with smooth gradient rings
+- **2×2 Circular Gauges + Network Row** — CPU, Memory, Disk, Temperature gauges with a Download / Ping / Upload stats row
 - **Native macOS Look & Feel** — system visual effect materials, blends seamlessly with your desktop
 - **Live Process Details** — click CPU or Memory gauge to see top processes, auto-refreshes while open
 - **Memory Purge** — clear inactive memory cache with a spinning progress indicator and bounce animation
 - **Real CPU Temperature** — actual sensor data via SMC (System Management Controller)
 - **6 Color Themes** — Ocean, Lavender, Emerald, Sunset, Rosé, and Mono — switch from the menu bar
 - **Smart Color System** — rings are solid at low usage, tips gradually warm up as values rise
+- **Network Monitor** — live download/upload speeds (KB/s, MB/s) and ping latency with color-coded indicator
 - **Menu Bar Stats** — quick glance at CPU, Memory, Disk, and Temp without opening the widget
 - **Launch at Login** — one-click setup from the menu bar, auto-copies to Applications
 - **Remembers Position** — widget stays where you last placed it across restarts
@@ -47,6 +48,7 @@ open MacMonitor.app
 | **Change theme** | Menu bar icon → **Theme** → pick a color scheme |
 | **Launch at login** | Menu bar icon → **Launch at Login** (toggles on/off) |
 | **Show / Hide** | Menu bar icon → **Show Widget** / **Hide Widget** |
+| **Network stats** | Download, Ping, and Upload are shown in the third row |
 | **Quick stats** | Click the menu bar icon to see live CPU, Memory, Disk, Temp |
 | **Quit** | Menu bar icon → **Quit** |
 
@@ -73,6 +75,8 @@ MacMonitor is a pure Swift/SwiftUI application with no external dependencies. It
 | Memory | `vm_statistics64` via Mach |
 | Disk | `FileManager` volume capacity APIs |
 | Temperature | IOKit SMC (System Management Controller) sensor reads |
+| Network Speed | `getifaddrs` — bytes in/out delta across en*/bridge* interfaces |
+| Ping | `/sbin/ping` — single ICMP echo to 8.8.8.8 (3s timeout) |
 | Processes | `/bin/ps` output, parsed and grouped |
 
 ### Performance

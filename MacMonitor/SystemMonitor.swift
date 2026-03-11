@@ -98,6 +98,9 @@ class SystemMonitor: ObservableObject {
     @Published var topRAMProcesses: [ProcessEntry] = []
     @Published var topCPUProcesses: [ProcessEntry] = []
     @Published var purgeJustCompleted: Bool = false
+    @Published var downloadSpeed: Double = 0  // bytes/sec
+    @Published var uploadSpeed: Double = 0    // bytes/sec
+    @Published var ping: Double = 0           // ms
 
     // Set by ContentView to auto-refresh process lists while detail is open
     var activeDetail: String = "none"
@@ -112,6 +115,9 @@ class SystemMonitor: ObservableObject {
     private var smcConn: io_connect_t = 0
     private var smoothedTemp: Double = 0
     private var tickCount: Int = 0
+    private var prevBytesIn: UInt64 = 0
+    private var prevBytesOut: UInt64 = 0
+    private var lastNetworkTime: Date?
 
     // Cached SMC key info — dataSize per key, queried once
     private var smcKeyInfoCache: [UInt32: UInt32] = [:]
@@ -126,11 +132,15 @@ class SystemMonitor: ObservableObject {
         }
         openSMC()
         update(diskToo: true)
+        updateNetworkSpeed() // seed initial bytes
+        updatePing()
         timer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
             guard let self = self else { return }
             self.tickCount += 1
             // Disk changes rarely — check every ~30s (every 6th tick)
             self.update(diskToo: self.tickCount % 6 == 0)
+            self.updateNetworkSpeed()
+            self.updatePing()
             // Auto-refresh process list while detail view is open
             if self.activeDetail == "cpu" { self.fetchTopCPUProcesses() }
             else if self.activeDetail == "ram" { self.fetchTopRAMProcesses() }
@@ -345,6 +355,80 @@ class SystemMonitor: ObservableObject {
                 $0.trimmingCharacters(in: .whitespaces)
             }.filter { !$0.isEmpty }
             completion(lines)
+        }
+    }
+
+    // MARK: - Network Speed
+    private func getNetworkBytes() -> (bytesIn: UInt64, bytesOut: UInt64) {
+        var ifaddr: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&ifaddr) == 0, let firstAddr = ifaddr else { return (0, 0) }
+        defer { freeifaddrs(ifaddr) }
+
+        var totalIn: UInt64 = 0
+        var totalOut: UInt64 = 0
+        var ptr: UnsafeMutablePointer<ifaddrs>? = firstAddr
+        while let p = ptr {
+            let name = String(cString: p.pointee.ifa_name)
+            if (name.hasPrefix("en") || name.hasPrefix("bridge")),
+               p.pointee.ifa_addr.pointee.sa_family == UInt8(AF_LINK),
+               let data = p.pointee.ifa_data {
+                let ifData = data.assumingMemoryBound(to: if_data.self)
+                totalIn += UInt64(ifData.pointee.ifi_ibytes)
+                totalOut += UInt64(ifData.pointee.ifi_obytes)
+            }
+            ptr = p.pointee.ifa_next
+        }
+        return (totalIn, totalOut)
+    }
+
+    private func updateNetworkSpeed() {
+        let now = Date()
+        let bytes = getNetworkBytes()
+
+        if let lastTime = lastNetworkTime, prevBytesIn > 0 {
+            let elapsed = now.timeIntervalSince(lastTime)
+            guard elapsed > 0 else { return }
+            let dlSpeed = Double(bytes.bytesIn.subtractingReportingOverflow(prevBytesIn).overflow ? 0 : bytes.bytesIn - prevBytesIn) / elapsed
+            let ulSpeed = Double(bytes.bytesOut.subtractingReportingOverflow(prevBytesOut).overflow ? 0 : bytes.bytesOut - prevBytesOut) / elapsed
+            DispatchQueue.main.async {
+                let roundedDL = (dlSpeed / 1024 * 10).rounded() / 10
+                let roundedUL = (ulSpeed / 1024 * 10).rounded() / 10
+                if self.downloadSpeed != roundedDL { self.downloadSpeed = roundedDL }
+                if self.uploadSpeed != roundedUL { self.uploadSpeed = roundedUL }
+            }
+        }
+        prevBytesIn = bytes.bytesIn
+        prevBytesOut = bytes.bytesOut
+        lastNetworkTime = now
+    }
+
+    // MARK: - Ping
+    private func updatePing() {
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let task = Process()
+            task.executableURL = URL(fileURLWithPath: "/sbin/ping")
+            task.arguments = ["-c", "1", "-t", "3", "8.8.8.8"]
+            let pipe = Pipe()
+            task.standardOutput = pipe
+            task.standardError = FileHandle.nullDevice
+            do { try task.run() } catch { return }
+            task.waitUntilExit()
+            guard task.terminationStatus == 0,
+                  let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) else {
+                DispatchQueue.main.async { self?.ping = -1 }
+                return
+            }
+            // Parse "time=12.345 ms"
+            if let range = output.range(of: "time="),
+               let msRange = output.range(of: " ms", range: range.upperBound..<output.endIndex) {
+                let timeStr = String(output[range.upperBound..<msRange.lowerBound])
+                if let ms = Double(timeStr) {
+                    DispatchQueue.main.async {
+                        let rounded = (ms * 10).rounded() / 10
+                        if self?.ping != rounded { self?.ping = rounded }
+                    }
+                }
+            }
         }
     }
 
