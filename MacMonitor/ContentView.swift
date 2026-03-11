@@ -15,7 +15,7 @@ struct ContentView: View {
                 gaugeGrid
             case .ram:
                 ProcessListView(
-                    title: "Bellek Kullanımı",
+                    title: "Memory Usage",
                     subtitle: String(format: "%.1f/%.0f GB", monitor.usedRAM, monitor.totalRAM),
                     processes: monitor.topRAMProcesses,
                     formatValue: { formatMB($0) },
@@ -26,7 +26,7 @@ struct ContentView: View {
                 )
             case .cpu:
                 ProcessListView(
-                    title: "CPU Kullanımı",
+                    title: "CPU Usage",
                     subtitle: String(format: "%%%.0f", monitor.cpuUsage),
                     processes: monitor.topCPUProcesses,
                     formatValue: { String(format: "%.1f%%", $0) },
@@ -57,7 +57,7 @@ struct ContentView: View {
 
                 GaugeCell(
                     icon: "memorychip",
-                    label: "Bellek",
+                    label: "Memory",
                     value: String(format: "%.1fG", monitor.usedRAM),
                     percent: monitor.totalRAM > 0 ? monitor.usedRAM / monitor.totalRAM : 0,
                     tint: tint(monitor.totalRAM > 0 ? monitor.usedRAM / monitor.totalRAM * 100 : 0),
@@ -78,7 +78,7 @@ struct ContentView: View {
                 )
                 GaugeCell(
                     icon: "thermometer.medium",
-                    label: "Isı",
+                    label: "Temp",
                     value: String(format: "%.0f°C", monitor.cpuTemp),
                     percent: min(monitor.cpuTemp / 100, 1.0),
                     tint: tempTint(monitor.cpuTemp)
@@ -105,7 +105,7 @@ struct ContentView: View {
     }
 }
 
-// MARK: - Ortak Proses Listesi
+// MARK: - Process List View
 struct ProcessListView: View {
     let title: String
     let subtitle: String
@@ -243,10 +243,4 @@ struct GaugeCell: View {
         .frame(maxWidth: .infinity)
         .contentShape(Rectangle())
     }
-}
-
-#Preview {
-    ContentView()
-        .frame(width: 300, height: 300)
-        .background(.black)
 }

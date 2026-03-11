@@ -1,22 +1,22 @@
 #!/bin/bash
-# MacMonitor — Çift tıkla, kurulsun ve açılsın
+# MacMonitor — Double-click to build and launch
 set -e
 
 cd "$(dirname "$0")"
 
-# Xcode Command Line Tools kontrolü
+# Check for Xcode Command Line Tools
 if ! xcode-select -p &>/dev/null; then
-    echo "Xcode Command Line Tools gerekli. Kuruluyor..."
+    echo "Xcode Command Line Tools required. Installing..."
     xcode-select --install
-    echo "Kurulum tamamlandıktan sonra bu dosyayı tekrar çift tıkla."
-    read -p "Kapatmak için Enter'a bas..."
+    echo "After installation completes, double-click this file again."
+    read -p "Press Enter to close..."
     exit 1
 fi
 
 SDK=$(xcrun --show-sdk-path)
 ARCH=$(uname -m)
 
-echo "Derleniyor..."
+echo "Compiling..."
 swiftc \
   -target ${ARCH}-apple-macosx13.0 \
   -sdk "$SDK" \
@@ -30,14 +30,14 @@ swiftc \
   MacMonitor/ContentView.swift \
   MacMonitor/MacMonitorApp.swift
 
-echo "Uygulama oluşturuluyor..."
+echo "Creating app bundle..."
 mkdir -p MacMonitor.app/Contents/MacOS
 mkdir -p MacMonitor.app/Contents/Resources
 mv MacMonitor_bin MacMonitor.app/Contents/MacOS/MacMonitor
 cp MacMonitor/Info.plist MacMonitor.app/Contents/
 
-echo "Başlatılıyor..."
+echo "Launching..."
 open MacMonitor.app
 
 echo ""
-echo "MacMonitor hazır! Bu pencereyi kapatabilirsin."
+echo "MacMonitor is ready! You can close this window."

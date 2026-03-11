@@ -1,5 +1,5 @@
 #!/bin/bash
-# MacMonitor — Derle ve çalıştır
+# MacMonitor — Build and run
 set -e
 
 cd "$(dirname "$0")"
@@ -7,7 +7,7 @@ cd "$(dirname "$0")"
 SDK=$(xcrun --show-sdk-path)
 ARCH=$(uname -m)
 
-echo "⚙ Derleniyor..."
+echo "Compiling..."
 swiftc \
   -target ${ARCH}-apple-macosx13.0 \
   -sdk "$SDK" \
@@ -21,16 +21,16 @@ swiftc \
   MacMonitor/ContentView.swift \
   MacMonitor/MacMonitorApp.swift
 
-echo "📦 .app bundle oluşturuluyor..."
+echo "Creating app bundle..."
 mkdir -p MacMonitor.app/Contents/MacOS
 mkdir -p MacMonitor.app/Contents/Resources
 mv MacMonitor_bin MacMonitor.app/Contents/MacOS/MacMonitor
 cp MacMonitor/Info.plist MacMonitor.app/Contents/
 
-echo "✅ MacMonitor.app hazır!"
+echo "MacMonitor.app is ready!"
 echo ""
-echo "Çalıştırmak için:"
+echo "To launch:"
 echo "  open MacMonitor.app"
 echo ""
-echo "Applications klasörüne kopyalamak için:"
+echo "To copy to Applications:"
 echo "  cp -r MacMonitor.app /Applications/"

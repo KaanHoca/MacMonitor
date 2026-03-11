@@ -27,17 +27,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             defer: false
         )
 
-        // NSVisualEffectView — macOS native widget materyali
+        // NSVisualEffectView — native macOS widget material
         let visualEffect = NSVisualEffectView(frame: NSRect(origin: .zero, size: size))
         visualEffect.material = .hudWindow
         visualEffect.blendingMode = .behindWindow
         visualEffect.state = .active
         visualEffect.appearance = NSAppearance(named: .darkAqua)
 
-        // maskImage ile köşe yuvarlama — kenarlık çizgisi olmadan
+        // Rounded corners via maskImage — no border artifacts
         visualEffect.maskImage = roundedMask(cornerRadius: 18)
 
-        // SwiftUI içeriği
+        // SwiftUI content
         let hosting = NSHostingView(rootView: ContentView())
         hosting.translatesAutoresizingMaskIntoConstraints = false
         hosting.wantsLayer = true
@@ -56,23 +56,38 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         window.backgroundColor = .clear
         window.hasShadow = true
 
-        // Masaüstü seviyesi — uygulama pencereleri bunun üstüne gelir
+        // Desktop level — app windows float above this
         window.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.desktopIconWindow)) + 1)
         window.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
         window.isMovableByWindowBackground = true
         window.hidesOnDeactivate = false
         window.isReleasedWhenClosed = false
 
-        if let screen = NSScreen.main {
-            let x = screen.visibleFrame.minX + 16
-            let y = screen.visibleFrame.maxY - 200
+        // Restore saved position or default to bottom-right
+        if let savedX = UserDefaults.standard.object(forKey: "windowX") as? CGFloat,
+           let savedY = UserDefaults.standard.object(forKey: "windowY") as? CGFloat {
+            window.setFrameOrigin(NSPoint(x: savedX, y: savedY))
+        } else if let screen = NSScreen.main {
+            let x = screen.visibleFrame.maxX - size.width - 16
+            let y = screen.visibleFrame.minY + 16
             window.setFrameOrigin(NSPoint(x: x, y: y))
+        }
+
+        // Save position whenever the window moves
+        NotificationCenter.default.addObserver(
+            forName: NSWindow.didMoveNotification,
+            object: window,
+            queue: .main
+        ) { [weak self] _ in
+            guard let origin = self?.window.frame.origin else { return }
+            UserDefaults.standard.set(origin.x, forKey: "windowX")
+            UserDefaults.standard.set(origin.y, forKey: "windowY")
         }
 
         window.orderFrontRegardless()
     }
 
-    /// NSVisualEffectView için stretchable mask image oluşturur — kenarlık artefaktı bırakmaz
+    /// Creates a stretchable mask image for NSVisualEffectView — clean rounded corners
     private func roundedMask(cornerRadius: CGFloat) -> NSImage {
         let edge = 2.0 * cornerRadius + 1.0
         let size = NSSize(width: edge, height: edge)
@@ -100,9 +115,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         let menu = NSMenu()
-        menu.addItem(NSMenuItem(title: "Widget'ı Göster", action: #selector(showWidget), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "Show Widget", action: #selector(showWidget), keyEquivalent: ""))
         menu.addItem(NSMenuItem.separator())
-        menu.addItem(NSMenuItem(title: "Kapat", action: #selector(quitApp), keyEquivalent: "q"))
+        menu.addItem(NSMenuItem(title: "Quit", action: #selector(quitApp), keyEquivalent: "q"))
         statusItem?.menu = menu
     }
 

@@ -20,7 +20,7 @@ A lightweight, native macOS desktop widget that displays real-time system metric
 
 ## Quick Start
 
-**Double-click** the `Kur ve Çalıştır.command` file. That's it.
+**Double-click** the `Install and Run.command` file. That's it.
 
 > On first run, if Xcode Command Line Tools are not installed, you'll be prompted to install them. Once the installation finishes, double-click again.
 
@@ -78,7 +78,7 @@ MacMonitor/
 │   ├── SystemMonitor.swift      # System metrics collection engine
 │   └── Info.plist               # App configuration
 ├── build.sh                     # Terminal build script
-└── Kur ve Çalıştır.command      # One-click build & run
+└── Install and Run.command       # One-click build & run
 ```
 
 ## Contributing
