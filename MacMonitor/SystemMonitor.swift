@@ -1,6 +1,86 @@
 import Foundation
 import Darwin
 import IOKit
+import SwiftUI
+
+// MARK: - Theme
+
+struct ThemeColors {
+    let low: (Color, Color)       // gradient pair for normal
+    let mid: (Color, Color)       // gradient pair for warning
+    let high: (Color, Color)      // gradient pair for critical
+    let accent: Color             // process bar, action button tint
+    let disk: (Color, Color)      // fixed gradient for disk (no severity change)
+    let temp: Color               // base color for temperature gauge
+}
+
+enum AppTheme: String, CaseIterable {
+    case ocean    = "Ocean"
+    case purple   = "Lavender"
+    case green    = "Emerald"
+    case sunset   = "Sunset"
+    case rose     = "Rosé"
+    case mono     = "Mono"
+
+    var colors: ThemeColors {
+        switch self {
+        case .ocean:
+            return ThemeColors(
+                low: (.cyan, .blue),
+                mid: (.yellow, .orange),
+                high: (.orange, .red),
+                accent: .cyan,
+                disk: (Color(red: 0.4, green: 0.6, blue: 0.8), Color(red: 0.3, green: 0.5, blue: 0.7)),
+                temp: Color(red: 0.45, green: 0.75, blue: 0.7)
+            )
+        case .purple:
+            return ThemeColors(
+                low: (.purple, .indigo),
+                mid: (.pink, .purple),
+                high: (.red, .pink),
+                accent: .purple,
+                disk: (Color(red: 0.6, green: 0.5, blue: 0.75), Color(red: 0.5, green: 0.4, blue: 0.65)),
+                temp: Color(red: 0.65, green: 0.5, blue: 0.7)
+            )
+        case .green:
+            return ThemeColors(
+                low: (.green, .mint),
+                mid: (.yellow, .orange),
+                high: (.orange, .red),
+                accent: .green,
+                disk: (Color(red: 0.45, green: 0.7, blue: 0.55), Color(red: 0.35, green: 0.6, blue: 0.45)),
+                temp: Color(red: 0.5, green: 0.72, blue: 0.6)
+            )
+        case .sunset:
+            return ThemeColors(
+                low: (.orange, .pink),
+                mid: (.red, .orange),
+                high: (.red, .purple),
+                accent: .orange,
+                disk: (Color(red: 0.8, green: 0.55, blue: 0.4), Color(red: 0.7, green: 0.45, blue: 0.35)),
+                temp: Color(red: 0.8, green: 0.6, blue: 0.45)
+            )
+        case .rose:
+            return ThemeColors(
+                low: (.pink, Color(red: 1, green: 0.4, blue: 0.6)),
+                mid: (.orange, .pink),
+                high: (.red, .pink),
+                accent: .pink,
+                disk: (Color(red: 0.75, green: 0.5, blue: 0.6), Color(red: 0.65, green: 0.4, blue: 0.5)),
+                temp: Color(red: 0.75, green: 0.55, blue: 0.6)
+            )
+        case .mono:
+            return ThemeColors(
+                low: (Color.white.opacity(0.7), Color.white.opacity(0.4)),
+                mid: (Color.white.opacity(0.8), Color.white.opacity(0.5)),
+                high: (Color.white.opacity(0.95), Color.white.opacity(0.6)),
+                accent: .white,
+                disk: (Color.white.opacity(0.5), Color.white.opacity(0.3)),
+                temp: Color.white.opacity(0.55)
+            )
+        }
+    }
+}
 
 struct ProcessEntry: Identifiable {
     var id: String { name }
@@ -17,6 +97,15 @@ class SystemMonitor: ObservableObject {
     @Published var cpuTemp: Double = 0
     @Published var topRAMProcesses: [ProcessEntry] = []
     @Published var topCPUProcesses: [ProcessEntry] = []
+    @Published var purgeJustCompleted: Bool = false
+
+    // Set by ContentView to auto-refresh process lists while detail is open
+    var activeDetail: String = "none"
+
+    // Theme — persisted in UserDefaults
+    @Published var theme: AppTheme {
+        didSet { UserDefaults.standard.set(theme.rawValue, forKey: "theme") }
+    }
 
     private var timer: Timer?
     private var prevCPU: (user: UInt32, sys: UInt32, idle: UInt32, nice: UInt32) = (0,0,0,0)
@@ -28,6 +117,13 @@ class SystemMonitor: ObservableObject {
     private var smcKeyInfoCache: [UInt32: UInt32] = [:]
 
     init() {
+        // Restore saved theme
+        if let saved = UserDefaults.standard.string(forKey: "theme"),
+           let t = AppTheme(rawValue: saved) {
+            self.theme = t
+        } else {
+            self.theme = .ocean
+        }
         openSMC()
         update(diskToo: true)
         timer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
@@ -35,6 +131,9 @@ class SystemMonitor: ObservableObject {
             self.tickCount += 1
             // Disk changes rarely — check every ~30s (every 6th tick)
             self.update(diskToo: self.tickCount % 6 == 0)
+            // Auto-refresh process list while detail view is open
+            if self.activeDetail == "cpu" { self.fetchTopCPUProcesses() }
+            else if self.activeDetail == "ram" { self.fetchTopRAMProcesses() }
         }
     }
 
@@ -143,19 +242,27 @@ class SystemMonitor: ObservableObject {
     }
 
     // MARK: - Purge Memory
-    func purgeRAM() {
+    func purgeRAM(completion: @escaping (Bool) -> Void) {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             // Opens macOS admin password prompt via osascript
             let task = Process()
             task.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
             task.arguments = ["-e", "do shell script \"/usr/sbin/purge\" with administrator privileges"]
-            do { try task.run() } catch { return }
-            task.waitUntilExit()
-            // Refresh data after purge
-            self?.update(diskToo: false)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
-                self?.fetchTopRAMProcesses()
+            do { try task.run() } catch {
+                DispatchQueue.main.async { completion(false) }
+                return
             }
+            task.waitUntilExit()
+            let success = task.terminationStatus == 0
+            // Refresh data after purge
+            if success {
+                self?.update(diskToo: false)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                    self?.fetchTopRAMProcesses()
+                    self?.purgeJustCompleted = true
+                }
+            }
+            DispatchQueue.main.async { completion(success) }
         }
     }
 

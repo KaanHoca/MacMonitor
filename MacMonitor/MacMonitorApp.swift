@@ -10,9 +10,17 @@ struct MacMonitorApp: App {
     }
 }
 
-class AppDelegate: NSObject, NSApplicationDelegate {
+class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var window: NSWindow!
     var statusItem: NSStatusItem?
+    let monitor = SystemMonitor()
+
+    // Menu items for live stats
+    private var cpuMenuItem: NSMenuItem!
+    private var ramMenuItem: NSMenuItem!
+    private var diskMenuItem: NSMenuItem!
+    private var tempMenuItem: NSMenuItem!
+    private var menuUpdateTimer: Timer?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -37,8 +45,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Rounded corners via maskImage — no border artifacts
         visualEffect.maskImage = roundedMask(cornerRadius: 18)
 
-        // SwiftUI content
-        let hosting = NSHostingView(rootView: ContentView())
+        // SwiftUI content — share the same monitor instance
+        let hosting = NSHostingView(rootView: ContentView(monitor: monitor))
         hosting.translatesAutoresizingMaskIntoConstraints = false
         hosting.wantsLayer = true
         hosting.layer?.backgroundColor = .clear
@@ -107,6 +115,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         return false
     }
 
+    // MARK: - Status Bar
+
     private func setupStatusBar() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let button = statusItem?.button {
@@ -115,14 +125,109 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         let menu = NSMenu()
+        menu.delegate = self
+
+        // Stats header
+        let headerItem = NSMenuItem(title: "MacMonitor", action: nil, keyEquivalent: "")
+        headerItem.isEnabled = false
+        let headerAttr = NSAttributedString(string: "MacMonitor", attributes: [
+            .font: NSFont.systemFont(ofSize: 13, weight: .semibold),
+            .foregroundColor: NSColor.labelColor
+        ])
+        headerItem.attributedTitle = headerAttr
+        menu.addItem(headerItem)
+        menu.addItem(NSMenuItem.separator())
+
+        cpuMenuItem = makeStatsItem("cpu", "CPU", "—")
+        ramMenuItem = makeStatsItem("memorychip", "Memory", "—")
+        diskMenuItem = makeStatsItem("internaldrive", "Disk", "—")
+        tempMenuItem = makeStatsItem("thermometer.medium", "Temp", "—")
+
+        menu.addItem(cpuMenuItem)
+        menu.addItem(ramMenuItem)
+        menu.addItem(diskMenuItem)
+        menu.addItem(tempMenuItem)
+
+        menu.addItem(NSMenuItem.separator())
+
+        // Theme submenu
+        let themeItem = NSMenuItem(title: "Theme", action: nil, keyEquivalent: "")
+        themeItem.image = NSImage(systemSymbolName: "paintpalette", accessibilityDescription: "Theme")
+        themeItem.image?.size = NSSize(width: 14, height: 14)
+        let themeMenu = NSMenu()
+        for theme in AppTheme.allCases {
+            let item = NSMenuItem(title: theme.rawValue, action: #selector(themeSelected(_:)), keyEquivalent: "")
+            item.representedObject = theme.rawValue
+            item.target = self
+            if theme == monitor.theme { item.state = .on }
+            themeMenu.addItem(item)
+        }
+        themeItem.submenu = themeMenu
+        menu.addItem(themeItem)
+
+        menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "Show Widget", action: #selector(showWidget), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: "Hide Widget", action: #selector(hideWidget), keyEquivalent: ""))
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "Quit", action: #selector(quitApp), keyEquivalent: "q"))
+
         statusItem?.menu = menu
+    }
+
+    private func makeStatsItem(_ symbolName: String, _ label: String, _ value: String) -> NSMenuItem {
+        let item = NSMenuItem(title: "\(label):  \(value)", action: nil, keyEquivalent: "")
+        item.isEnabled = false
+        item.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: label)
+        item.image?.size = NSSize(width: 14, height: 14)
+        return item
+    }
+
+    private func updateMenuStats() {
+        let cpu = String(format: "%.0f%%", monitor.cpuUsage)
+        let ram = String(format: "%.1f / %.0f GB", monitor.usedRAM, monitor.totalRAM)
+        let disk = monitor.diskLabel
+        let temp = String(format: "%.0f°C", monitor.cpuTemp)
+
+        cpuMenuItem.title = "CPU:  \(cpu)"
+        ramMenuItem.title = "Memory:  \(ram)"
+        diskMenuItem.title = "Disk:  \(disk)"
+        tempMenuItem.title = "Temp:  \(temp)"
+    }
+
+    // MARK: - NSMenuDelegate
+
+    func menuWillOpen(_ menu: NSMenu) {
+        updateMenuStats()
+        menuUpdateTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: true) { [weak self] _ in
+            self?.updateMenuStats()
+        }
+    }
+
+    func menuDidClose(_ menu: NSMenu) {
+        menuUpdateTimer?.invalidate()
+        menuUpdateTimer = nil
+    }
+
+    // MARK: - Actions
+
+    @objc private func themeSelected(_ sender: NSMenuItem) {
+        guard let rawValue = sender.representedObject as? String,
+              let theme = AppTheme(rawValue: rawValue) else { return }
+        monitor.theme = theme
+        // Update checkmarks
+        if let themeMenu = sender.menu {
+            for item in themeMenu.items {
+                item.state = (item.representedObject as? String) == rawValue ? .on : .off
+            }
+        }
     }
 
     @objc private func showWidget() {
         window.orderFrontRegardless()
+    }
+
+    @objc private func hideWidget() {
+        window.orderOut(nil)
     }
 
     @objc private func quitApp() {
