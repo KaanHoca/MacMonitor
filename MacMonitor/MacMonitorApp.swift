@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import ServiceManagement
 
 @main
 struct MacMonitorApp: App {
@@ -21,6 +22,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var diskMenuItem: NSMenuItem!
     private var tempMenuItem: NSMenuItem!
     private var menuUpdateTimer: Timer?
+    private var launchAtLoginItem: NSMenuItem!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -166,6 +168,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(themeItem)
 
         menu.addItem(NSMenuItem.separator())
+
+        // Launch at Login
+        launchAtLoginItem = NSMenuItem(title: "Launch at Login", action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
+        launchAtLoginItem.target = self
+        launchAtLoginItem.state = isLaunchAtLoginEnabled() ? .on : .off
+        menu.addItem(launchAtLoginItem)
+
+        menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "Show Widget", action: #selector(showWidget), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "Hide Widget", action: #selector(hideWidget), keyEquivalent: ""))
         menu.addItem(NSMenuItem.separator())
@@ -220,6 +230,56 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 item.state = (item.representedObject as? String) == rawValue ? .on : .off
             }
         }
+    }
+
+    // MARK: - Launch at Login
+
+    private func isLaunchAtLoginEnabled() -> Bool {
+        if #available(macOS 13.0, *) {
+            return SMAppService.mainApp.status == .enabled
+        }
+        return false
+    }
+
+    @objc private func toggleLaunchAtLogin() {
+        // Ensure app is in /Applications first
+        let appPath = Bundle.main.bundlePath
+        let appsPath = "/Applications/MacMonitor.app"
+
+        if appPath != appsPath {
+            do {
+                if FileManager.default.fileExists(atPath: appsPath) {
+                    try FileManager.default.removeItem(atPath: appsPath)
+                }
+                try FileManager.default.copyItem(atPath: appPath, toPath: appsPath)
+            } catch {
+                showAlert("Could not copy to Applications folder.\nTry moving MacMonitor.app to /Applications manually.")
+                return
+            }
+        }
+
+        if #available(macOS 13.0, *) {
+            do {
+                if isLaunchAtLoginEnabled() {
+                    try SMAppService.mainApp.unregister()
+                    launchAtLoginItem.state = .off
+                } else {
+                    try SMAppService.mainApp.register()
+                    launchAtLoginItem.state = .on
+                }
+            } catch {
+                showAlert("Could not update Login Items.\nYou can add it manually in System Settings → General → Login Items.")
+            }
+        }
+    }
+
+    private func showAlert(_ message: String) {
+        let alert = NSAlert()
+        alert.messageText = "MacMonitor"
+        alert.informativeText = message
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
     }
 
     @objc private func showWidget() {

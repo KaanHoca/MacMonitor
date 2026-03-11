@@ -9,13 +9,17 @@ A lightweight, native macOS desktop widget that displays real-time system metric
 
 ## Features
 
-- **2×2 Circular Gauges** — CPU usage, Memory, Disk, and CPU Temperature at a glance
-- **Native macOS Look & Feel** — uses the system's visual effect materials, blends seamlessly with your desktop
-- **Process Details** — tap CPU or Memory gauge to see top processes ranked by usage
-- **Memory Purge** — clear inactive memory cache directly from the widget (requires admin password)
-- **Real CPU Temperature** — reads actual sensor data via SMC (System Management Controller)
+- **2×2 Circular Gauges** — CPU, Memory, Disk, and Temperature with smooth gradient rings
+- **Native macOS Look & Feel** — system visual effect materials, blends seamlessly with your desktop
+- **Live Process Details** — click CPU or Memory gauge to see top processes, auto-refreshes while open
+- **Memory Purge** — clear inactive memory cache with a spinning progress indicator and bounce animation
+- **Real CPU Temperature** — actual sensor data via SMC (System Management Controller)
+- **6 Color Themes** — Ocean, Lavender, Emerald, Sunset, Rosé, and Mono — switch from the menu bar
+- **Smart Color System** — rings are solid at low usage, tips gradually warm up as values rise
+- **Menu Bar Stats** — quick glance at CPU, Memory, Disk, and Temp without opening the widget
+- **Launch at Login** — one-click setup from the menu bar, auto-copies to Applications
+- **Remembers Position** — widget stays where you last placed it across restarts
 - **Desktop-Level Window** — stays behind app windows, always visible on your desktop
-- **Menu Bar Control** — show, hide, or quit from the menu bar icon
 - **Draggable** — position it anywhere on your screen
 
 ## Quick Start
@@ -40,13 +44,24 @@ open MacMonitor.app
 | **View processes** | Click the **CPU** or **Memory** gauge |
 | **Go back** | Click **<** in the detail view |
 | **Purge memory** | Click the purge button in Memory detail (admin password required) |
-| **Show / Hide** | Menu bar gauge icon → **Show Widget** |
-| **Quit** | Menu bar gauge icon → **Quit** |
+| **Change theme** | Menu bar icon → **Theme** → pick a color scheme |
+| **Launch at login** | Menu bar icon → **Launch at Login** (toggles on/off) |
+| **Show / Hide** | Menu bar icon → **Show Widget** / **Hide Widget** |
+| **Quick stats** | Click the menu bar icon to see live CPU, Memory, Disk, Temp |
+| **Quit** | Menu bar icon → **Quit** |
 
-## Auto-Launch on Login
+## Themes
 
-1. Copy `MacMonitor.app` to `/Applications`
-2. Go to **System Settings → General → Login Items** and add MacMonitor
+| Theme | Style |
+|---|---|
+| **Ocean** | Cyan / Blue |
+| **Lavender** | Purple / Indigo |
+| **Emerald** | Green / Mint |
+| **Sunset** | Orange / Pink |
+| **Rosé** | Pink / Rose |
+| **Mono** | White / Gray |
+
+Your selected theme is saved and persists across restarts.
 
 ## How It Works
 
@@ -60,7 +75,16 @@ MacMonitor is a pure Swift/SwiftUI application with no external dependencies. It
 | Temperature | IOKit SMC (System Management Controller) sensor reads |
 | Processes | `/bin/ps` output, parsed and grouped |
 
-All system calls run on background threads; the UI updates on the main thread every 3 seconds.
+### Performance
+
+- UI updates every **5 seconds** (not 3) to minimize CPU overhead
+- Disk is checked every **~30 seconds** (rarely changes)
+- SMC key info is **cached** — queried once, reused forever
+- Published properties only update when values **actually change**, preventing unnecessary SwiftUI redraws
+- Process lists only refresh while the **detail view is open**
+- Menu bar stats only update while the **menu is open**
+
+Typical CPU usage: **~1–2%**
 
 ## Requirements
 
@@ -73,12 +97,12 @@ All system calls run on background threads; the UI updates on the main thread ev
 ```
 MacMonitor/
 ├── MacMonitor/
-│   ├── MacMonitorApp.swift      # App entry point, window & menu bar setup
-│   ├── ContentView.swift        # SwiftUI views, gauges & process lists
-│   ├── SystemMonitor.swift      # System metrics collection engine
+│   ├── MacMonitorApp.swift      # App entry, window, menu bar & launch at login
+│   ├── ContentView.swift        # SwiftUI views, gauges, themes & process lists
+│   ├── SystemMonitor.swift      # System metrics engine & theme definitions
 │   └── Info.plist               # App configuration
 ├── build.sh                     # Terminal build script
-└── Install and Run.command       # One-click build & run
+└── Install and Run.command      # One-click build & run
 ```
 
 ## Contributing

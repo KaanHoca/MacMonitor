@@ -14,6 +14,7 @@ swiftc \
   -framework AppKit \
   -framework SwiftUI \
   -framework IOKit \
+  -framework ServiceManagement \
   -parse-as-library \
   -O \
   -o MacMonitor_bin \
