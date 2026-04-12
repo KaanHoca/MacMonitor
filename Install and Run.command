@@ -28,6 +28,7 @@ swiftc \
   -O \
   -o MacMonitor_bin \
   MacMonitor/SystemMonitor.swift \
+  MacMonitor/DiskCleaner.swift \
   MacMonitor/ContentView.swift \
   MacMonitor/MacMonitorApp.swift
 

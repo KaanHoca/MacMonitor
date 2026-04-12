@@ -104,6 +104,9 @@ class SystemMonitor: ObservableObject {
     @Published var localIP: String = "—"
     @Published var externalIP: String = "—"
 
+    // Disk cleaner instance — shared with ContentView
+    let diskCleaner = DiskCleaner()
+
     // Set by ContentView to auto-refresh process lists while detail is open
     var activeDetail: String = "none"
 
@@ -155,6 +158,11 @@ class SystemMonitor: ObservableObject {
     deinit {
         timer?.invalidate()
         if smcConn != 0 { IOServiceClose(smcConn) }
+    }
+
+    /// Refresh disk stats after cleanup
+    func refreshDisk() {
+        update(diskToo: true)
     }
 
     private func update(diskToo: Bool) {
