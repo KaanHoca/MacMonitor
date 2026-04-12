@@ -145,6 +145,24 @@ struct ContentView: View {
                 .frame(maxWidth: .infinity)
             }
             .padding(.horizontal, 4)
+
+            // IP addresses row
+            HStack(spacing: 0) {
+                // External IP
+                CopyableIPCell(
+                    icon: "globe",
+                    ip: monitor.externalIP,
+                    accent: tc.accent
+                )
+
+                // Local IP
+                CopyableIPCell(
+                    icon: "wifi",
+                    ip: monitor.localIP,
+                    accent: tc.accent
+                )
+            }
+            .padding(.horizontal, 4)
         }
         .padding(20)
     }
@@ -481,6 +499,40 @@ struct GaugeCell: View {
                         bounceScale = 1.0
                     }
                 }
+            }
+        }
+    }
+}
+
+// MARK: - Copyable IP Cell
+struct CopyableIPCell: View {
+    let icon: String
+    let ip: String
+    let accent: Color
+
+    @State private var copied = false
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: copied ? "checkmark.circle.fill" : icon)
+                .font(.system(size: 10))
+                .foregroundStyle(copied ? .green : accent.opacity(0.7))
+            Text(copied ? "Copied!" : ip)
+                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .foregroundStyle(copied ? .green.opacity(0.8) : .white.opacity(0.55))
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+        }
+        .frame(maxWidth: .infinity)
+        .contentShape(Rectangle())
+        .scaleEffect(copied ? 1.08 : 1.0)
+        .onTapGesture {
+            guard ip != "—" && !copied else { return }
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(ip, forType: .string)
+            withAnimation(.easeOut(duration: 0.2)) { copied = true }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                withAnimation(.easeIn(duration: 0.2)) { copied = false }
             }
         }
     }

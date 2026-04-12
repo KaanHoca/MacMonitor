@@ -9,7 +9,7 @@ A lightweight, native macOS desktop widget that displays real-time system metric
 
 ## Features
 
-- **2×2 Circular Gauges + Network Row** — CPU, Memory, Disk, Temperature gauges with a Download / Ping / Upload stats row
+- **2×2 Circular Gauges + Network & IP Rows** — CPU, Memory, Disk, Temperature gauges with Download / Ping / Upload stats and External / Local IP display
 - **Native macOS Look & Feel** — system visual effect materials, blends seamlessly with your desktop
 - **Live Process Details** — click CPU or Memory gauge to see top processes, auto-refreshes while open
 - **Memory Purge** — clear inactive memory cache with a spinning progress indicator and bounce animation
@@ -17,6 +17,7 @@ A lightweight, native macOS desktop widget that displays real-time system metric
 - **6 Color Themes** — Ocean, Lavender, Emerald, Sunset, Rosé, and Mono — switch from the menu bar
 - **Smart Color System** — rings are solid at low usage, tips gradually warm up as values rise
 - **Network Monitor** — live download/upload speeds (KB/s, MB/s) and ping latency with color-coded indicator
+- **IP Addresses** — external (public) and local IP shown below network stats, tap to copy with animation
 - **Menu Bar Stats** — quick glance at CPU, Memory, Disk, and Temp without opening the widget
 - **Launch at Login** — one-click setup from the menu bar, auto-copies to Applications
 - **Remembers Position** — widget stays where you last placed it across restarts
@@ -49,6 +50,7 @@ open MacMonitor.app
 | **Launch at login** | Menu bar icon → **Launch at Login** (toggles on/off) |
 | **Show / Hide** | Menu bar icon → **Show Widget** / **Hide Widget** |
 | **Network stats** | Download, Ping, and Upload are shown in the third row |
+| **Copy IP** | Click the External or Local IP address to copy it to clipboard |
 | **Quick stats** | Click the menu bar icon to see live CPU, Memory, Disk, Temp |
 | **Quit** | Menu bar icon → **Quit** |
 
@@ -77,12 +79,15 @@ MacMonitor is a pure Swift/SwiftUI application with no external dependencies. It
 | Temperature | IOKit SMC (System Management Controller) sensor reads |
 | Network Speed | `getifaddrs` — bytes in/out delta across en*/bridge* interfaces |
 | Ping | `/sbin/ping` — single ICMP echo to 8.8.8.8 (3s timeout) |
+| Local IP | `getifaddrs` — IPv4 address from active interface (en0 preferred) |
+| External IP | `api.ipify.org` — public IP via lightweight HTTP request |
 | Processes | `/bin/ps` output, parsed and grouped |
 
 ### Performance
 
 - UI updates every **5 seconds** (not 3) to minimize CPU overhead
 - Disk is checked every **~30 seconds** (rarely changes)
+- IP addresses refresh every **~60 seconds** (rarely change)
 - SMC key info is **cached** — queried once, reused forever
 - Published properties only update when values **actually change**, preventing unnecessary SwiftUI redraws
 - Process lists only refresh while the **detail view is open**

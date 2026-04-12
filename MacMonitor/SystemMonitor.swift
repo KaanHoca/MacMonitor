@@ -101,6 +101,8 @@ class SystemMonitor: ObservableObject {
     @Published var downloadSpeed: Double = 0  // bytes/sec
     @Published var uploadSpeed: Double = 0    // bytes/sec
     @Published var ping: Double = 0           // ms
+    @Published var localIP: String = "—"
+    @Published var externalIP: String = "—"
 
     // Set by ContentView to auto-refresh process lists while detail is open
     var activeDetail: String = "none"
@@ -134,6 +136,7 @@ class SystemMonitor: ObservableObject {
         update(diskToo: true)
         updateNetworkSpeed() // seed initial bytes
         updatePing()
+        updateIPs()
         timer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
             guard let self = self else { return }
             self.tickCount += 1
@@ -141,6 +144,8 @@ class SystemMonitor: ObservableObject {
             self.update(diskToo: self.tickCount % 6 == 0)
             self.updateNetworkSpeed()
             self.updatePing()
+            // IPs change rarely — check every ~60s (every 12th tick)
+            if self.tickCount % 12 == 0 { self.updateIPs() }
             // Auto-refresh process list while detail view is open
             if self.activeDetail == "cpu" { self.fetchTopCPUProcesses() }
             else if self.activeDetail == "ram" { self.fetchTopRAMProcesses() }
@@ -430,6 +435,75 @@ class SystemMonitor: ObservableObject {
                 }
             }
         }
+    }
+
+    // MARK: - IP Addresses
+
+    private func updateIPs() {
+        // Local IP — synchronous, lightweight
+        let local = getLocalIP()
+        DispatchQueue.main.async {
+            if self.localIP != local { self.localIP = local }
+        }
+        // External IP — async network request
+        getExternalIP { [weak self] ip in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                if self.externalIP != ip { self.externalIP = ip }
+            }
+        }
+    }
+
+    private func getLocalIP() -> String {
+        var ifaddr: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&ifaddr) == 0, let firstAddr = ifaddr else { return "—" }
+        defer { freeifaddrs(ifaddr) }
+
+        var result: String? = nil
+        var fallback: String? = nil
+        var ptr: UnsafeMutablePointer<ifaddrs>? = firstAddr
+        while let p = ptr {
+            let flags = Int32(p.pointee.ifa_flags)
+            let isUp = (flags & IFF_UP) != 0
+            let isRunning = (flags & IFF_RUNNING) != 0
+            let isLoopback = (flags & IFF_LOOPBACK) != 0
+
+            if isUp && isRunning && !isLoopback,
+               p.pointee.ifa_addr.pointee.sa_family == UInt8(AF_INET) {
+                let name = String(cString: p.pointee.ifa_name)
+                var addr = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+                getnameinfo(p.pointee.ifa_addr,
+                            socklen_t(p.pointee.ifa_addr.pointee.sa_len),
+                            &addr, socklen_t(addr.count),
+                            nil, 0, NI_NUMERICHOST)
+                let ip = String(cString: addr)
+                // Prefer en0 (Wi-Fi / Ethernet primary)
+                if name == "en0" { return ip }
+                if name.hasPrefix("en") && result == nil { result = ip }
+                if fallback == nil { fallback = ip }
+            }
+            ptr = p.pointee.ifa_next
+        }
+        return result ?? fallback ?? "—"
+    }
+
+    private func getExternalIP(completion: @escaping (String) -> Void) {
+        guard let url = URL(string: "https://api.ipify.org") else {
+            completion("—")
+            return
+        }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 5
+        URLSession.shared.dataTask(with: request) { data, response, error in
+            guard error == nil,
+                  let data = data,
+                  let ip = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !ip.isEmpty else {
+                completion("—")
+                return
+            }
+            completion(ip)
+        }.resume()
     }
 
     // MARK: - Temperature (SMC)

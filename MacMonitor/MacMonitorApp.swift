@@ -28,7 +28,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         NSApp.setActivationPolicy(.accessory)
         setupStatusBar()
 
-        let size = NSSize(width: 300, height: 300)
+        let size = NSSize(width: 300, height: 320)
 
         window = NSWindow(
             contentRect: NSRect(origin: .zero, size: size),
