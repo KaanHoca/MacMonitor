@@ -13,10 +13,10 @@ A lightweight, native macOS desktop widget that displays real-time system metric
 - **Disk Cleanup** — scan and clean 19 categories of junk files safely (caches, logs, old installers, etc.)
 - **Native macOS Look & Feel** — system visual effect materials, blends seamlessly with your desktop
 - **Live Process Details** — click CPU or Memory gauge to see top processes, auto-refreshes while open
-- **Memory Purge** — clear inactive memory cache with progress indicator and bounce animation
+- **Memory Cleanup** — two options: Quick (no password, memory pressure) and Purge (admin, system-level)
 - **Real CPU Temperature** — actual sensor data via SMC (System Management Controller)
-- **6 Color Themes** — Ocean, Lavender, Emerald, Sunset, Rose, and Mono
-- **Smart Color System** — rings are solid at low usage, tips gradually warm up as values rise
+- **6 Color Themes** — Ocean, Lavender, Emerald, Sunset, Sakura, and Mono
+- **Clean Single-Color Rings** — each gauge uses a solid theme color for a modern, minimal look
 - **Network Monitor** — live download/upload speeds and ping latency with color-coded indicator
 - **IP Addresses** — external and local IP shown below network stats, tap to copy
 - **Menu Bar Stats** — quick glance at CPU, Memory, Disk, and Temp without opening the widget
@@ -46,7 +46,8 @@ open MacMonitor.app
 | **View processes** | Click the **CPU** or **Memory** gauge |
 | **Disk cleanup** | Click the **Disk** gauge to scan and clean junk files |
 | **Go back** | Click **<** in the detail view |
-| **Purge memory** | Click the **Purge** button in Memory detail (admin password required) |
+| **Quick memory clean** | Click the **Quick** button in Memory detail (no password needed) |
+| **Deep memory purge** | Click the **Purge** button in Memory detail (admin password required) |
 | **Change theme** | Menu bar icon > **Theme** > pick a color scheme |
 | **Launch at login** | Menu bar icon > **Launch at Login** (toggles on/off) |
 | **Show / Hide** | Menu bar icon > **Show Widget** / **Hide Widget** |
@@ -77,12 +78,12 @@ All toggle preferences are saved and persist across restarts. Categories not pre
 
 | Theme | Style |
 |---|---|
-| **Ocean** | Cyan / Blue |
-| **Lavender** | Purple / Indigo |
-| **Emerald** | Green / Mint |
-| **Sunset** | Orange / Pink |
-| **Rosé** | Pink / Rose |
-| **Mono** | White / Gray |
+| **Ocean** | Sky blue, steel blue, teal |
+| **Lavender** | Vivid purple, deep lavender, mauve |
+| **Emerald** | Emerald green, teal, mint |
+| **Sunset** | Warm amber, burnt orange, gold |
+| **Sakura** | Rose pink, deep rose, soft pink |
+| **Mono** | White, light gray, soft gray |
 
 Your selected theme is saved and persists across restarts.
 

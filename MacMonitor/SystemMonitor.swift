@@ -6,12 +6,10 @@ import SwiftUI
 // MARK: - Theme
 
 struct ThemeColors {
-    let low: (Color, Color)       // gradient pair for normal
-    let mid: (Color, Color)       // gradient pair for warning
-    let high: (Color, Color)      // gradient pair for critical
-    let accent: Color             // process bar, action button tint
-    let disk: (Color, Color)      // fixed gradient for disk (no severity change)
-    let temp: Color               // base color for temperature gauge
+    let ring: Color       // primary ring color for CPU & RAM gauges
+    let accent: Color     // UI highlights, buttons, process bars
+    let disk: Color       // disk gauge ring color
+    let temp: Color       // temperature gauge ring color
 }
 
 enum AppTheme: String, CaseIterable {
@@ -19,64 +17,52 @@ enum AppTheme: String, CaseIterable {
     case purple   = "Lavender"
     case green    = "Emerald"
     case sunset   = "Sunset"
-    case rose     = "Rosé"
+    case rose     = "Sakura"
     case mono     = "Mono"
 
     var colors: ThemeColors {
         switch self {
         case .ocean:
             return ThemeColors(
-                low: (.cyan, .blue),
-                mid: (.yellow, .orange),
-                high: (.orange, .red),
-                accent: .cyan,
-                disk: (Color(red: 0.4, green: 0.6, blue: 0.8), Color(red: 0.3, green: 0.5, blue: 0.7)),
-                temp: Color(red: 0.45, green: 0.75, blue: 0.7)
+                ring:   Color(red: 0.35, green: 0.72, blue: 0.95),
+                accent: Color(red: 0.35, green: 0.72, blue: 0.95),
+                disk:   Color(red: 0.38, green: 0.55, blue: 0.85),
+                temp:   Color(red: 0.28, green: 0.76, blue: 0.82)
             )
         case .purple:
             return ThemeColors(
-                low: (.purple, .indigo),
-                mid: (.pink, .purple),
-                high: (.red, .pink),
-                accent: .purple,
-                disk: (Color(red: 0.6, green: 0.5, blue: 0.75), Color(red: 0.5, green: 0.4, blue: 0.65)),
-                temp: Color(red: 0.65, green: 0.5, blue: 0.7)
+                ring:   Color(red: 0.68, green: 0.48, blue: 0.93),
+                accent: Color(red: 0.68, green: 0.48, blue: 0.93),
+                disk:   Color(red: 0.52, green: 0.44, blue: 0.82),
+                temp:   Color(red: 0.76, green: 0.56, blue: 0.86)
             )
         case .green:
             return ThemeColors(
-                low: (.green, .mint),
-                mid: (.yellow, .orange),
-                high: (.orange, .red),
-                accent: .green,
-                disk: (Color(red: 0.45, green: 0.7, blue: 0.55), Color(red: 0.35, green: 0.6, blue: 0.45)),
-                temp: Color(red: 0.5, green: 0.72, blue: 0.6)
+                ring:   Color(red: 0.30, green: 0.78, blue: 0.55),
+                accent: Color(red: 0.30, green: 0.78, blue: 0.55),
+                disk:   Color(red: 0.24, green: 0.65, blue: 0.62),
+                temp:   Color(red: 0.42, green: 0.82, blue: 0.65)
             )
         case .sunset:
             return ThemeColors(
-                low: (.orange, .pink),
-                mid: (.red, .orange),
-                high: (.red, .purple),
-                accent: .orange,
-                disk: (Color(red: 0.8, green: 0.55, blue: 0.4), Color(red: 0.7, green: 0.45, blue: 0.35)),
-                temp: Color(red: 0.8, green: 0.6, blue: 0.45)
+                ring:   Color(red: 0.95, green: 0.62, blue: 0.30),
+                accent: Color(red: 0.95, green: 0.62, blue: 0.30),
+                disk:   Color(red: 0.84, green: 0.48, blue: 0.34),
+                temp:   Color(red: 0.92, green: 0.72, blue: 0.38)
             )
         case .rose:
             return ThemeColors(
-                low: (.pink, Color(red: 1, green: 0.4, blue: 0.6)),
-                mid: (.orange, .pink),
-                high: (.red, .pink),
-                accent: .pink,
-                disk: (Color(red: 0.75, green: 0.5, blue: 0.6), Color(red: 0.65, green: 0.4, blue: 0.5)),
-                temp: Color(red: 0.75, green: 0.55, blue: 0.6)
+                ring:   Color(red: 0.92, green: 0.45, blue: 0.62),
+                accent: Color(red: 0.92, green: 0.45, blue: 0.62),
+                disk:   Color(red: 0.78, green: 0.38, blue: 0.55),
+                temp:   Color(red: 0.95, green: 0.58, blue: 0.68)
             )
         case .mono:
             return ThemeColors(
-                low: (Color.white.opacity(0.7), Color.white.opacity(0.4)),
-                mid: (Color.white.opacity(0.8), Color.white.opacity(0.5)),
-                high: (Color.white.opacity(0.95), Color.white.opacity(0.6)),
-                accent: .white,
-                disk: (Color.white.opacity(0.5), Color.white.opacity(0.3)),
-                temp: Color.white.opacity(0.55)
+                ring:   Color.white.opacity(0.68),
+                accent: Color.white,
+                disk:   Color.white.opacity(0.52),
+                temp:   Color.white.opacity(0.58)
             )
         }
     }
@@ -264,7 +250,60 @@ class SystemMonitor: ObservableObject {
         return (String(format: "%.0f/%.0fG", usedGB, totalGB), percent)
     }
 
-    // MARK: - Purge Memory
+    // MARK: - Quick Purge (Memory Pressure)
+    func quickPurgeRAM(completion: @escaping (Bool) -> Void) {
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            // Read VM stats to determine reclaimable memory
+            var stats = vm_statistics64()
+            var count = mach_msg_type_number_t(
+                MemoryLayout<vm_statistics64>.size / MemoryLayout<integer_t>.size
+            )
+            let kr = withUnsafeMutablePointer(to: &stats) {
+                $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                    host_statistics64(mach_host_self(), HOST_VM_INFO64, $0, &count)
+                }
+            }
+
+            let pageSize = Int(vm_page_size)
+            var targetBytes: Int
+            if kr == KERN_SUCCESS {
+                let reclaimable = Int(
+                    stats.free_count + stats.inactive_count + stats.purgeable_count
+                ) * pageSize
+                targetBytes = reclaimable * 8 / 10
+            } else {
+                targetBytes = Int(ProcessInfo.processInfo.physicalMemory) / 2
+            }
+            let maxTarget = Int(ProcessInfo.processInfo.physicalMemory) * 3 / 4
+            targetBytes = min(targetBytes, maxTarget)
+
+            // Allocate and touch memory in chunks to create pressure
+            let chunkSize = 64 * 1024 * 1024 // 64 MB
+            var allocations: [UnsafeMutableRawPointer] = []
+            var allocated = 0
+            while allocated < targetBytes {
+                guard let ptr = malloc(chunkSize) else { break }
+                memset(ptr, 0xFF, chunkSize)
+                allocations.append(ptr)
+                allocated += chunkSize
+            }
+
+            // Release all allocated memory
+            for ptr in allocations { free(ptr) }
+
+            // Brief pause for the OS to reclaim pages
+            Thread.sleep(forTimeInterval: 0.5)
+
+            self?.update(diskToo: false)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                self?.fetchTopRAMProcesses()
+                self?.purgeJustCompleted = true
+            }
+            DispatchQueue.main.async { completion(true) }
+        }
+    }
+
+    // MARK: - Deep Purge (Admin)
     func purgeRAM(completion: @escaping (Bool) -> Void) {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             // Opens macOS admin password prompt via osascript

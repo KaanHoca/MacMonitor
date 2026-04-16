@@ -29,9 +29,12 @@ struct ContentView: View {
                         monitor.activeDetail = "none"
                         withAnimation(.easeInOut(duration: 0.25)) { detail = .none }
                     },
-                    actionIcon: "arrow.triangle.2.circlepath",
-                    actionLabel: "Purge",
-                    onAction: { done in monitor.purgeRAM(completion: done) }
+                    actionIcon: "bolt.fill",
+                    actionLabel: "Quick",
+                    onAction: { done in monitor.quickPurgeRAM(completion: done) },
+                    secondaryIcon: "lock.fill",
+                    secondaryLabel: "Purge",
+                    onSecondaryAction: { done in monitor.purgeRAM(completion: done) }
                 )
                 .transition(.move(edge: .trailing).combined(with: .opacity))
             case .cpu:
@@ -53,7 +56,7 @@ struct ContentView: View {
                 DiskCleanupView(
                     cleaner: monitor.diskCleaner,
                     accent: tc.accent,
-                    diskGradient: tc.disk,
+                    diskColor: tc.disk,
                     onBack: {
                         monitor.activeDetail = "none"
                         withAnimation(.easeInOut(duration: 0.25)) { detail = .none }
@@ -77,7 +80,7 @@ struct ContentView: View {
                         label: "CPU",
                         value: String(format: "%.0f%%", monitor.cpuUsage),
                         percent: monitor.cpuUsage / 100,
-                        gradient: tintGradient(monitor.cpuUsage),
+                        color: tc.ring,
                         tappable: true
                     )
                     .onTapGesture {
@@ -91,7 +94,7 @@ struct ContentView: View {
                         label: "Memory",
                         value: String(format: "%.1fG", monitor.usedRAM),
                         percent: monitor.totalRAM > 0 ? monitor.usedRAM / monitor.totalRAM : 0,
-                        gradient: tintGradient(monitor.totalRAM > 0 ? monitor.usedRAM / monitor.totalRAM * 100 : 0),
+                        color: tc.ring,
                         tappable: true,
                         dropBounce: monitor.purgeJustCompleted
                     )
@@ -115,7 +118,7 @@ struct ContentView: View {
                         label: "Disk",
                         value: monitor.diskLabel,
                         percent: monitor.diskPercent / 100,
-                        gradient: Gradient(colors: [tc.disk.0, tc.disk.0]),
+                        color: tc.disk,
                         tappable: true
                     )
                     .onTapGesture {
@@ -127,7 +130,7 @@ struct ContentView: View {
                         label: "Temp",
                         value: String(format: "%.0f°C", monitor.cpuTemp),
                         percent: min(monitor.cpuTemp / 100, 1.0),
-                        gradient: tempGradient(monitor.cpuTemp)
+                        color: tc.temp
                     )
                 }
             }
@@ -194,56 +197,9 @@ struct ContentView: View {
         .padding(20)
     }
 
-    // Ring is a single solid color at low values.
-    // As value rises, only the tip gradually warms up.
-    // low → solid base | mid → base..warm tip | high → base..hot tip
-    func tintGradient(_ pct: Double) -> Gradient {
-        let tip = blendedTip(pct, midStart: 40, highStart: 70)
-        return Gradient(colors: [tc.low.0, tip])
-    }
-
-    func tempGradient(_ temp: Double) -> Gradient {
-        if temp <= 50 {
-            return Gradient(colors: [tc.temp, tc.temp])
-        } else if temp <= 75 {
-            let t = (temp - 50) / 25.0
-            let tip = lerp(tc.temp, .orange, t)
-            return Gradient(colors: [tc.temp, tip])
-        } else {
-            let t = min((temp - 75) / 25.0, 1.0)
-            let tip = lerp(.orange, .red, t)
-            return Gradient(colors: [tc.temp, tip])
-        }
-    }
-
-    private func blendedTip(_ value: Double, midStart: Double, highStart: Double) -> Color {
-        // Below midStart → tip = base color (solid ring, no gradient visible)
-        if value <= midStart {
-            return tc.low.0
-        } else if value <= highStart {
-            let t = (value - midStart) / (highStart - midStart)
-            return lerp(tc.low.0, tc.mid.0, t)
-        } else {
-            let t = min((value - highStart) / (100.0 - highStart), 1.0)
-            return lerp(tc.mid.0, tc.high.0, t)
-        }
-    }
-
-    // Linear interpolation between two SwiftUI Colors via RGB
-    private func lerp(_ a: Color, _ b: Color, _ t: Double) -> Color {
-        let t = min(max(t, 0), 1)
-        let ra = NSColor(a).usingColorSpace(.sRGB) ?? NSColor.white
-        let rb = NSColor(b).usingColorSpace(.sRGB) ?? NSColor.white
-        return Color(
-            red:   ra.redComponent   + (rb.redComponent   - ra.redComponent)   * t,
-            green: ra.greenComponent + (rb.greenComponent - ra.greenComponent) * t,
-            blue:  ra.blueComponent  + (rb.blueComponent  - ra.blueComponent)  * t
-        )
-    }
-
     func processBarColor(_ value: Double, thresholds: (Double, Double)) -> Color {
-        if value >= thresholds.1 { return tc.high.0 }
-        if value >= thresholds.0 { return tc.mid.0 }
+        if value >= thresholds.1 { return Color(red: 0.9, green: 0.3, blue: 0.3) }
+        if value >= thresholds.0 { return Color(red: 0.95, green: 0.65, blue: 0.3) }
         return tc.accent
     }
 
@@ -279,8 +235,13 @@ struct ProcessListView: View {
     var actionIcon: String? = nil
     var actionLabel: String? = nil
     var onAction: ((@escaping (Bool) -> Void) -> Void)? = nil
+    var secondaryIcon: String? = nil
+    var secondaryLabel: String? = nil
+    var onSecondaryAction: ((@escaping (Bool) -> Void) -> Void)? = nil
     @State private var actionState: ActionState = .idle
     @State private var spinAngle: Double = 0
+    @State private var secondaryState: ActionState = .idle
+    @State private var secondarySpinAngle: Double = 0
 
     enum ActionState { case idle, running, done }
 
@@ -340,7 +301,7 @@ struct ProcessListView: View {
             }
 
             // Action bar
-            if actionIcon != nil || actionLabel != nil {
+            if actionIcon != nil || actionLabel != nil || secondaryIcon != nil || secondaryLabel != nil {
                 actionBar
             }
         }
@@ -397,12 +358,50 @@ struct ProcessListView: View {
         .padding(.vertical, 2)
     }
 
+    private func actionButton(
+        icon: String, label: String?,
+        state: ActionState, spin: Double,
+        onTap: @escaping () -> Void
+    ) -> some View {
+        Button(action: onTap) {
+            HStack(spacing: 5) {
+                Group {
+                    switch state {
+                    case .idle:
+                        Image(systemName: icon)
+                            .foregroundStyle(.white)
+                    case .running:
+                        Image(systemName: icon)
+                            .foregroundStyle(.white)
+                            .rotationEffect(.degrees(spin))
+                    case .done:
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                    }
+                }
+                .font(.system(size: 10, weight: .semibold))
+
+                if let label = label {
+                    Text(state == .done ? "Done" : label)
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.white)
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 6)
+            .background(state == .done ? Color.green.opacity(0.3) : accent.opacity(0.3))
+            .cornerRadius(8)
+        }
+        .buttonStyle(.plain)
+        .disabled(state == .running)
+    }
+
     private var actionBar: some View {
         HStack {
             Spacer()
 
             if let icon = actionIcon {
-                Button {
+                actionButton(icon: icon, label: actionLabel, state: actionState, spin: spinAngle) {
                     guard actionState == .idle else { return }
                     withAnimation { actionState = .running }
                     withAnimation(.linear(duration: 1).repeatForever(autoreverses: false)) {
@@ -419,37 +418,28 @@ struct ProcessListView: View {
                             }
                         }
                     }
-                } label: {
-                    HStack(spacing: 5) {
-                        Group {
-                            switch actionState {
-                            case .idle:
-                                Image(systemName: icon)
-                                    .foregroundStyle(.white)
-                            case .running:
-                                Image(systemName: icon)
-                                    .foregroundStyle(.white)
-                                    .rotationEffect(.degrees(spinAngle))
-                            case .done:
-                                Image(systemName: "checkmark.circle.fill")
-                                    .foregroundStyle(.green)
+                }
+            }
+
+            if let icon = secondaryIcon {
+                actionButton(icon: icon, label: secondaryLabel, state: secondaryState, spin: secondarySpinAngle) {
+                    guard secondaryState == .idle else { return }
+                    withAnimation { secondaryState = .running }
+                    withAnimation(.linear(duration: 1).repeatForever(autoreverses: false)) {
+                        secondarySpinAngle = 360
+                    }
+                    onSecondaryAction? { success in
+                        withAnimation {
+                            secondarySpinAngle = 0
+                            secondaryState = success ? .done : .idle
+                        }
+                        if success {
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                                withAnimation { secondaryState = .idle }
                             }
                         }
-                        .font(.system(size: 10, weight: .semibold))
-
-                        if let label = actionLabel {
-                            Text(actionState == .done ? "Done" : label)
-                                .font(.system(size: 10, weight: .semibold))
-                                .foregroundStyle(.white)
-                        }
                     }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 6)
-                    .background(actionState == .done ? Color.green.opacity(0.3) : accent.opacity(0.3))
-                    .cornerRadius(8)
                 }
-                .buttonStyle(.plain)
-                .disabled(actionState == .running)
             }
         }
         .padding(.top, 10)
@@ -462,7 +452,7 @@ struct GaugeCell: View {
     let label: String
     let value: String
     let percent: Double
-    let gradient: Gradient
+    let color: Color
     var tappable: Bool = false
     var dropBounce: Bool = false
 
@@ -471,9 +461,6 @@ struct GaugeCell: View {
     @State private var bounceOffset: CGFloat = 0
     @State private var bounceScale: CGFloat = 1.0
 
-    // Primary color from gradient for glow
-    private var glowColor: Color { gradient.stops.first?.color ?? .cyan }
-
     private let ringSize: CGFloat = 80
 
     var body: some View {
@@ -481,7 +468,7 @@ struct GaugeCell: View {
             // Soft glow behind ring for tappable gauges
             if tappable {
                 Circle()
-                    .fill(glowColor.opacity(glowPhase ? 0.12 : 0.04))
+                    .fill(color.opacity(glowPhase ? 0.12 : 0.04))
                     .frame(width: ringSize - 4, height: ringSize - 4)
                     .blur(radius: glowPhase ? 14 : 8)
                     .animation(
@@ -493,7 +480,7 @@ struct GaugeCell: View {
             // Hover: full circle outline glow
             if tappable {
                 Circle()
-                    .stroke(glowColor.opacity(isHovered ? 0.35 : 0), lineWidth: 2)
+                    .stroke(color.opacity(isHovered ? 0.35 : 0), lineWidth: 2)
                     .frame(width: ringSize + 6, height: ringSize + 6)
                     .blur(radius: 5)
                     .animation(.easeOut(duration: 0.3), value: isHovered)
@@ -504,18 +491,10 @@ struct GaugeCell: View {
 
             Circle()
                 .trim(from: 0, to: CGFloat(min(max(percent, 0), 1.0)))
-                .stroke(
-                    AngularGradient(
-                        gradient: gradient,
-                        center: .center,
-                        startAngle: .degrees(-90),
-                        endAngle: .degrees(-90 + 360 * min(max(percent, 0.01), 1.0))
-                    ),
-                    style: StrokeStyle(lineWidth: 6, lineCap: .round)
-                )
+                .stroke(color, style: StrokeStyle(lineWidth: 6, lineCap: .round))
                 .rotationEffect(.degrees(-90))
                 .animation(.easeInOut(duration: 0.6), value: percent)
-                .shadow(color: tappable ? glowColor.opacity(glowPhase ? 0.5 : 0.2) : .clear, radius: glowPhase ? 6 : 3)
+                .shadow(color: tappable ? color.opacity(glowPhase ? 0.5 : 0.2) : .clear, radius: glowPhase ? 6 : 3)
 
             VStack(spacing: 1) {
                 Image(systemName: icon)
@@ -605,7 +584,7 @@ struct CopyableIPCell: View {
 struct DiskCleanupView: View {
     @ObservedObject var cleaner: DiskCleaner
     let accent: Color
-    let diskGradient: (Color, Color)
+    let diskColor: Color
     let onBack: () -> Void
     var onCleanComplete: (() -> Void)? = nil
 
