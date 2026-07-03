@@ -2,6 +2,14 @@
 
 Bu dosya projede yapılan önemli işlemleri ve alınan kararları özetler. Yeni bir çalışmaya başlamadan önce bu dosyayı ve architecture.md dosyasını kontrol et, işlem sonrası güncelle.
 
+## Sürüm 2.0.1 Düzeltmeleri (Temmuz 2026, kullanıcı geri bildirimi)
+
+- **Fan boost M4'te çalışmıyordu.** Kök neden: modern Apple Silicon'da (M4 dahil) "FS! " force-bits anahtarı yok; SMC probe ile doğrulandı (F0Md ui8 mevcut, FS! missing). FanHelper artık mimariden tahmin etmek yerine anahtar introspeksiyonu yapıyor: manuel mod F*Md üzerinden (yoksa FS! fallback), hedef RPM anahtarın bildirdiği kodlamayla (flt veya fpe2) yazılıyor. SMC yazmayı reddederse helper hata koduyla çıkıyor.
+- **Boost dürüstlüğü:** boost süresince tepe RPM izleniyor; fanlar hızlanmadıysa buton "No effect" gösteriyor ve 15 dakikalık cooldown BAŞLAMIYOR. Etkisiz boost'un bıraktığı eski cooldown kaydı da temizlendi.
+- **Dinamik yükseklik kayması:** pencere artık ekranın hangi kenarına yakınsa o kenar sabitlenerek büyüyor; detaydan dönüşte detaya girmeden önceki kare aynen geri yükleniyor (kullanıcı detaydayken pencereyi taşımadıysa); programatik boyutlandırmalar kayıtlı konumu artık ezmiyor. Eski hatanın UserDefaults'a yazdığı kaymış konum düzeltildi (windowX 16, windowY 1075).
+- **Quick RAM temizliği kendi listesinin tepesine çıkıyordu:** basınç tahsisi malloc yerine mmap/munmap ile yapılıyor (sayfalar OS'e anında dönüyor) ve işlem sırasında süreç listesi yenilemesi duraklatılıyor.
+- Test kancası eklendi: `-debugReturnAfter <saniye>` detaydan otomatik dönüş (konum doğrulaması için).
+
 ## Sürüm 2.0 (Temmuz 2026)
 
 ### Düzeltilen Hatalar

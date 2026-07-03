@@ -123,20 +123,16 @@ func writeByte(_ key: String, value: UInt8) -> Bool {
     return writeSMCRaw(key, bytes: [value])
 }
 
-// MARK: - Architecture Detection
-
-func isAppleSilicon() -> Bool {
-    var sysinfo = utsname()
-    uname(&sysinfo)
-    let machine = withUnsafePointer(to: &sysinfo.machine) {
-        $0.withMemoryRebound(to: CChar.self, capacity: Int(_SYS_NAMELEN)) {
-            String(cString: $0)
-        }
-    }
-    return machine.hasPrefix("arm64")
-}
-
 // MARK: - Fan Control
+//
+// Key availability differs per model, not just per architecture: modern
+// Apple Silicon (e.g. M4) has no "FS! " force-bits key and uses the per-fan
+// "F*Md" mode key instead, while some older models only have "FS! ". The
+// target key encoding (flt vs fpe2) also varies. Everything is therefore
+// introspected from SMC key info instead of guessed from the architecture.
+
+let fltType  = fourCC("flt ")
+let fpe2Type = fourCC("fpe2")
 
 func setForcedBit(_ fanIndex: Int, forced: Bool) -> Bool {
     let key = "FS! "
@@ -150,6 +146,28 @@ func setForcedBit(_ fanIndex: Int, forced: Bool) -> Bool {
     return writeSMCRaw(key, bytes: [UInt8(bits >> 8), UInt8(bits & 0xFF)])
 }
 
+/// Puts one fan into manual (or automatic) control. Prefers the per-fan
+/// mode key and falls back to the global force-bits key where it exists.
+func setManual(_ fanIndex: Int, manual: Bool) -> Bool {
+    let modeKey = "F\(fanIndex)Md"
+    if getKeyInfo(modeKey) != nil {
+        return writeByte(modeKey, value: manual ? 1 : 0)
+    }
+    return setForcedBit(fanIndex, forced: manual)
+}
+
+/// Writes a fan target key using the encoding the SMC reports for it.
+func writeTarget(_ key: String, rpm: Int) -> Bool {
+    guard let info = getKeyInfo(key) else { return false }
+    if info.dataType == fltType {
+        return writeFloat(key, value: Float32(rpm))
+    }
+    if info.dataType == fpe2Type {
+        return writeFpe2(key, value: UInt16(clamping: rpm))
+    }
+    return false
+}
+
 func boostFans(targetRPM: Int, duration: Int) {
     guard let countByte = readSMCByte("FNum") else {
         fputs("Error: Cannot read fan count\n", stderr)
@@ -161,19 +179,16 @@ func boostFans(targetRPM: Int, duration: Int) {
         exit(1)
     }
 
-    let appleSilicon = isAppleSilicon()
-
-    // Set fans to target RPM
+    var anySet = false
     for i in 0..<fanCount {
-        if appleSilicon {
-            // Apple Silicon: set force bit, then write target
-            _ = setForcedBit(i, forced: true)
-            _ = writeFloat("F\(i)Tg", value: Float32(targetRPM))
-        } else {
-            // Intel: set manual mode, then write target as fpe2
-            _ = writeByte("F\(i)Md", value: 1)
-            _ = writeFpe2("F\(i)Tg", value: UInt16(targetRPM))
-        }
+        let manualOK = setManual(i, manual: true)
+        let targetOK = writeTarget("F\(i)Tg", rpm: targetRPM)
+        if manualOK && targetOK { anySet = true }
+    }
+
+    guard anySet else {
+        fputs("Error: SMC rejected fan control writes\n", stderr)
+        exit(1)
     }
 
     // Wait for the boost duration
@@ -181,25 +196,15 @@ func boostFans(targetRPM: Int, duration: Int) {
 
     // Revert to auto mode
     for i in 0..<fanCount {
-        if appleSilicon {
-            _ = setForcedBit(i, forced: false)
-        } else {
-            _ = writeByte("F\(i)Md", value: 0)
-        }
+        _ = setManual(i, manual: false)
     }
 }
 
 func revertFans() {
     guard let countByte = readSMCByte("FNum") else { return }
     let fanCount = Int(countByte)
-    let appleSilicon = isAppleSilicon()
-
     for i in 0..<fanCount {
-        if appleSilicon {
-            _ = setForcedBit(i, forced: false)
-        } else {
-            _ = writeByte("F\(i)Md", value: 0)
-        }
+        _ = setManual(i, manual: false)
     }
 }
 

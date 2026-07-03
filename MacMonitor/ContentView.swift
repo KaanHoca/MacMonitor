@@ -80,6 +80,7 @@ struct ContentView: View {
                     boostActive: monitor.fanBoostActive,
                     boostSeconds: monitor.fanBoostSecondsRemaining,
                     cooldownSeconds: monitor.fanBoostCooldownRemaining,
+                    boostNoEffect: monitor.fanBoostNoEffect,
                     matchID: "ring-temp",
                     ns: ringNS,
                     onBack: { closeDetail() },
@@ -91,11 +92,13 @@ struct ContentView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.clear)
         .onChange(of: detail) { newDetail in
-            let height = newDetail == .none
-                ? UILayout.mainHeight(hasBattery: monitor.batteryPresent)
-                : UILayout.detailHeight
+            let isDetail = newDetail != .none
+            let height = isDetail
+                ? UILayout.detailHeight
+                : UILayout.mainHeight(hasBattery: monitor.batteryPresent)
             NotificationCenter.default.post(
-                name: .mmResizeWindow, object: nil, userInfo: ["height": height]
+                name: .mmResizeWindow, object: nil,
+                userInfo: ["height": height, "isDetail": isDetail]
             )
         }
         .onAppear {
@@ -115,6 +118,14 @@ struct ContentView: View {
                 detail = .fan
             default:
                 break
+            }
+            // Optional companion hook: -debugReturnAfter <seconds> closes the
+            // detail again, used to verify window position restore.
+            let returnAfter = UserDefaults.standard.integer(forKey: "debugReturnAfter")
+            if returnAfter > 0 {
+                DispatchQueue.main.asyncAfter(deadline: .now() + Double(returnAfter)) {
+                    closeDetail()
+                }
             }
         }
     }
@@ -796,6 +807,7 @@ struct ThermalsView: View {
     let boostActive: Bool
     let boostSeconds: Int
     let cooldownSeconds: Int
+    let boostNoEffect: Bool
     let matchID: String
     let ns: Namespace.ID
     let onBack: () -> Void
@@ -804,7 +816,7 @@ struct ThermalsView: View {
     @State private var boostState: BoostButtonState = .idle
     @State private var spinAngle: Double = 0
 
-    enum BoostButtonState { case idle, running, done }
+    enum BoostButtonState { case idle, running, done, failed }
 
     private var maxRPM: Double {
         fans.map { $0.maxRPM }.max() ?? 1
@@ -882,8 +894,8 @@ struct ThermalsView: View {
         .padding(16)
         .onChange(of: boostActive) { active in
             if !active && boostState == .running {
-                withAnimation { boostState = .done }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                withAnimation { boostState = boostNoEffect ? .failed : .done }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
                     withAnimation { boostState = .idle }
                 }
             }
@@ -988,6 +1000,9 @@ struct ThermalsView: View {
                         case .done:
                             Image(systemName: "checkmark.circle.fill")
                                 .foregroundStyle(.green)
+                        case .failed:
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(.orange)
                         }
                     }
                     .font(.system(size: 10, weight: .semibold))
@@ -1002,13 +1017,14 @@ struct ThermalsView: View {
                 .cornerRadius(8)
             }
             .buttonStyle(.plain)
-            .disabled(boostState == .running || boostActive || cooldownSeconds > 0)
+            .disabled(boostState != .idle || boostActive || cooldownSeconds > 0)
         }
         .padding(.top, 10)
     }
 
     private var boostLabel: String {
         if boostState == .done { return "Done" }
+        if boostState == .failed { return "No effect" }
         if boostActive { return "Boosting" }
         if cooldownSeconds > 0 { return "Cooldown" }
         return "Boost"
@@ -1016,6 +1032,7 @@ struct ThermalsView: View {
 
     private var boostBackground: Color {
         if boostState == .done { return Color.green.opacity(0.3) }
+        if boostState == .failed { return Color.orange.opacity(0.2) }
         if cooldownSeconds > 0 { return Color.white.opacity(0.08) }
         return accent.opacity(0.3)
     }

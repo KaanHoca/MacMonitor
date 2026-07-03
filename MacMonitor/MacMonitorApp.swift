@@ -34,6 +34,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusTextTimer: Timer?
     private var awakeAssertionID: IOPMAssertionID = 0
 
+    // Window geometry bookkeeping for dynamic height
+    private var savedGridFrame: NSRect?
+    private var lastSetFrame: NSRect?
+    private var isProgrammaticResize = false
+
     private var menuBarTextEnabled: Bool {
         get { UserDefaults.standard.bool(forKey: "menuBarText") }
         set { UserDefaults.standard.set(newValue, forKey: "menuBarText") }
@@ -98,13 +103,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             window.setFrameOrigin(NSPoint(x: x, y: y))
         }
 
-        // Save position whenever the window moves
+        // Save position whenever the user moves the window. Programmatic
+        // detail-view resizes are skipped so transient origins never leak
+        // into the persisted position.
         NotificationCenter.default.addObserver(
             forName: NSWindow.didMoveNotification,
             object: window,
             queue: .main
         ) { [weak self] _ in
-            guard let origin = self?.window.frame.origin else { return }
+            guard let self = self, !self.isProgrammaticResize else { return }
+            let origin = self.window.frame.origin
             UserDefaults.standard.set(origin.x, forKey: "windowX")
             UserDefaults.standard.set(origin.y, forKey: "windowY")
         }
@@ -116,29 +124,68 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             queue: .main
         ) { [weak self] note in
             guard let height = note.userInfo?["height"] as? CGFloat else { return }
-            self?.resizeWindow(to: height)
+            let isDetail = note.userInfo?["isDetail"] as? Bool ?? false
+            self?.resizeWindow(to: height, isDetail: isDetail)
         }
 
         window.orderFrontRegardless()
     }
 
-    /// Animates the window to a new height. The bottom edge stays anchored
-    /// (widgets usually sit near the bottom of the screen) and the frame is
-    /// clamped into the visible screen area.
-    private func resizeWindow(to height: CGFloat) {
-        guard window.frame.height != height else { return }
-        var frame = window.frame
+    /// Grows or shrinks a frame to the given height, keeping whichever
+    /// vertical edge sits closer to a screen edge fixed, then clamps the
+    /// result into the visible area.
+    private func anchoredFrame(from old: NSRect, height: CGFloat) -> NSRect {
+        var frame = old
         frame.size.height = height
-        if let screen = window.screen ?? NSScreen.main {
-            let visible = screen.visibleFrame
+        if let visible = (window.screen ?? NSScreen.main)?.visibleFrame {
+            let topGap = visible.maxY - old.maxY
+            let bottomGap = old.minY - visible.minY
+            if topGap < bottomGap {
+                // Window hugs the top of the screen: keep the top edge fixed
+                frame.origin.y = old.maxY - height
+            }
             if frame.maxY > visible.maxY { frame.origin.y -= frame.maxY - visible.maxY }
             if frame.origin.y < visible.minY { frame.origin.y = visible.minY }
         }
-        NSAnimationContext.runAnimationGroup { ctx in
+        return frame
+    }
+
+    /// Animates the window to a new height. Entering a detail view saves the
+    /// grid frame; returning restores it exactly (unless the user moved the
+    /// window meanwhile), so the widget never drifts away from its corner.
+    private func resizeWindow(to height: CGFloat, isDetail: Bool) {
+        let current = window.frame
+        guard current.height != height else { return }
+
+        let target: NSRect
+        if isDetail {
+            savedGridFrame = current
+            target = anchoredFrame(from: current, height: height)
+        } else {
+            let userMoved: Bool = {
+                guard let last = lastSetFrame else { return true }
+                return abs(current.origin.x - last.origin.x) > 1 || abs(current.origin.y - last.origin.y) > 1
+            }()
+            if let saved = savedGridFrame, !userMoved {
+                target = anchoredFrame(
+                    from: NSRect(x: saved.origin.x, y: saved.origin.y, width: saved.width, height: saved.height),
+                    height: height
+                )
+            } else {
+                target = anchoredFrame(from: current, height: height)
+            }
+            savedGridFrame = nil
+        }
+
+        lastSetFrame = target
+        isProgrammaticResize = true
+        NSAnimationContext.runAnimationGroup({ ctx in
             ctx.duration = 0.28
             ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-            window.animator().setFrame(frame, display: true)
-        }
+            self.window.animator().setFrame(target, display: true)
+        }, completionHandler: { [weak self] in
+            self?.isProgrammaticResize = false
+        })
     }
 
     /// Creates a stretchable mask image for NSVisualEffectView — clean rounded corners

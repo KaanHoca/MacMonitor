@@ -110,6 +110,7 @@ class SystemMonitor: ObservableObject {
     @Published var fanBoostActive: Bool = false
     @Published var fanBoostSecondsRemaining: Int = 0
     @Published var fanBoostCooldownRemaining: Int = 0
+    @Published var fanBoostNoEffect: Bool = false
 
     // Battery (portable Macs only; stays false on desktops)
     @Published var batteryPresent = false
@@ -146,6 +147,9 @@ class SystemMonitor: ObservableObject {
     private var cooldownTimer: Timer?
     private let cooldownKey = "fanBoostCooldownEnd"
     private static let boostDuration = 30  // seconds, matches the helper invocation
+    private var boostBaselineRPM: Double = 0
+    private var boostPeakRPM: Double = 0
+    private var memoryPressureActive = false
 
     init() {
         // Restore saved theme
@@ -175,9 +179,11 @@ class SystemMonitor: ObservableObject {
                 self.updateIPs()
                 self.updateBattery()
             }
-            // Auto-refresh process list while detail view is open
+            // Auto-refresh process list while detail view is open. Skipped
+            // during quick purge so our own pressure allocation does not
+            // show up as the top process mid-operation.
             if self.activeDetail == "cpu" { self.fetchTopCPUProcesses() }
-            else if self.activeDetail == "ram" { self.fetchTopRAMProcesses() }
+            else if self.activeDetail == "ram" && !self.memoryPressureActive { self.fetchTopRAMProcesses() }
         }
         // Common mode keeps ticks firing while menus are open or the window is dragged
         RunLoop.main.add(tick, forMode: .common)
@@ -238,6 +244,11 @@ class SystemMonitor: ObservableObject {
 
                 // Update fan data only when it actually changed
                 if self.fans != fanData { self.fans = fanData }
+
+                // Track the peak RPM during a boost for honest feedback
+                if self.fanBoostActive, let peak = fanData.map({ $0.actualRPM }).max() {
+                    self.boostPeakRPM = max(self.boostPeakRPM, peak)
+                }
 
                 self.history.append(
                     cpu: roundedCPU,
@@ -358,19 +369,25 @@ class SystemMonitor: ObservableObject {
             let maxTarget = Int(ProcessInfo.processInfo.physicalMemory) * 3 / 4
             targetBytes = min(targetBytes, maxTarget)
 
-            // Allocate and touch memory in chunks to create pressure
+            // Allocate and touch memory in chunks to create pressure.
+            // mmap/munmap instead of malloc/free: munmap returns the pages
+            // to the OS immediately, so MacMonitor's own footprint drops
+            // right back and it does not linger atop its own process list.
+            self.memoryPressureActive = true
             let chunkSize = 64 * 1024 * 1024 // 64 MB
-            var allocations: [UnsafeMutableRawPointer] = []
+            var regions: [UnsafeMutableRawPointer] = []
             var allocated = 0
             while allocated < targetBytes {
-                guard let ptr = malloc(chunkSize) else { break }
-                memset(ptr, 0xFF, chunkSize)
-                allocations.append(ptr)
+                let ptr = mmap(nil, chunkSize, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0)
+                guard let region = ptr, region != MAP_FAILED else { break }
+                memset(region, 0xFF, chunkSize)
+                regions.append(region)
                 allocated += chunkSize
             }
 
-            // Release all allocated memory
-            for ptr in allocations { free(ptr) }
+            // Release all allocated memory back to the OS
+            for region in regions { munmap(region, chunkSize) }
+            self.memoryPressureActive = false
 
             // Brief pause for the OS to reclaim pages
             Thread.sleep(forTimeInterval: 0.5)
@@ -1010,20 +1027,36 @@ class SystemMonitor: ObservableObject {
 
     private func startBoostCountdown() {
         fanBoostActive = true
+        fanBoostNoEffect = false
         fanBoostSecondsRemaining = Self.boostDuration
+        boostBaselineRPM = fans.map { $0.actualRPM }.max() ?? 0
+        boostPeakRPM = boostBaselineRPM
         boostTimer?.invalidate()
         let timer = Timer(timeInterval: 1, repeats: true) { [weak self] timer in
             guard let self = self else { timer.invalidate(); return }
             self.fanBoostSecondsRemaining -= 1
             if self.fanBoostSecondsRemaining <= 0 {
                 timer.invalidate()
-                self.fanBoostActive = false
-                self.startCooldown()
+                self.finishBoost()
             }
         }
         // Common mode keeps the countdown running while menus are open
         RunLoop.main.add(timer, forMode: .common)
         boostTimer = timer
+    }
+
+    private func finishBoost() {
+        fanBoostActive = false
+        // Honest feedback: only start the cooldown if the fans actually
+        // sped up; otherwise report that the boost had no effect.
+        if boostPeakRPM >= boostBaselineRPM + 150 {
+            startCooldown()
+        } else {
+            fanBoostNoEffect = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in
+                self?.fanBoostNoEffect = false
+            }
+        }
     }
 
     private func startCooldown() {
