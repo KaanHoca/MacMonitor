@@ -11,7 +11,7 @@ MacMonitor/
 │   │                         # keep awake, menu bar text mode, window resizing
 │   ├── ContentView.swift     # SwiftUI views: gauge grid, process lists,
 │   │                         # disk cleanup UI, thermals view, battery row
-│   ├── Components.swift      # Shared UI: TickGauge, Sparkline, HistoryGraph,
+│   ├── Components.swift      # Shared UI: TickGauge, HistoryGraph,
 │   │                         # DetailHeader, HistoryStore, UILayout constants
 │   ├── SystemMonitor.swift   # Metrics engine: CPU, RAM, disk, SMC temp/fans,
 │   │                         # network, IPs, battery, GPU, alerts, purge, themes
@@ -37,7 +37,7 @@ MacMonitor/
 
 ### HistoryStore
 
-Rolling 60-sample (5 minute) buffers for CPU, RAM, temperature and fan RPM. It is a separate `ObservableObject` deliberately: sparkline and graph views observe it directly, so per-tick appends do not invalidate the whole gauge grid. Published values on `SystemMonitor` still only change when the underlying value changes.
+Rolling 60-sample (5 minute) buffers for CPU, RAM, temperature and fan RPM. It is a separate `ObservableObject` deliberately: the Thermals history graphs observe it directly, so per-tick appends do not invalidate the whole gauge grid. Published values on `SystemMonitor` still only change when the underlying value changes.
 
 ## UI Structure
 
@@ -45,7 +45,7 @@ Rolling 60-sample (5 minute) buffers for CPU, RAM, temperature and fan RPM. It i
 - Gauges are `TickGauge` dials: discrete radial tick marks drawn in one Canvas, lit up to the value with brightness ramping toward the tip. A single code path draws all four, so their geometry is pixel-identical by construction; there is deliberately no blur, shadow or hover scaling (out-of-phase glow animations previously made equal rings look unequal). Ticks turn orange past a warn threshold and red past a critical threshold (CPU/RAM 85/95%, disk 90/97%, temp 85/95°C).
 - Hero transition: each dial and its detail header mini-dial share a `matchedGeometryEffect` id (`ring-cpu`, `ring-ram`, `ring-disk`, `ring-temp`) in one namespace. Tapping a gauge makes the dial fly into the header, where it stays live.
 - Dynamic window height: `ContentView` posts `.mmResizeWindow` with the target height (340pt grid, 368pt with battery row, 440pt details, see `UILayout`); `AppDelegate.resizeWindow` animates the frame with the bottom edge anchored and clamps into the visible screen.
-- Gauge columns pair an 80pt dial with a fixed 76x14pt secondary slot: CPU/RAM sparklines, disk cleanable-size badge (free space before a scan), fan RPM label (or temp sparkline on fanless Macs).
+- Dials are 100pt in two symmetric rows. Secondary info lives inside the dial as a small caption under the value: the disk dial shows free space (or the cleanable size after a scan), the temperature dial shows live fan RPM. Center text is capped to the dial's inner circle so it can never overlap the ticks.
 - Accessibility: each gauge column is one accessibility element with a label; tooltips via `.help`; the breathing glow honors Reduce Motion.
 
 ## Metrics Sources

@@ -9,7 +9,7 @@ A lightweight, native macOS desktop widget that displays real-time system metric
 
 ## Features
 
-- **2x2 Instrument Dials** — tick-based gauges for CPU, Memory, Disk and Temperature with live sparklines and secondary info; ticks shift to orange/red past warning and critical thresholds
+- **2x2 Instrument Dials** — tick-based gauges for CPU, Memory, Disk and Temperature; ticks shift to orange/red past warning and critical thresholds, and each dial carries its own caption (free disk space, cleanable size, fan RPM)
 - **Live Ring Transitions** — tap a gauge and its ring flies into the detail header, staying live while the detail is open
 - **Dynamic Window Height** — the widget grows for detail views and shrinks back, bottom edge anchored
 - **Thermals View** — CPU temperature history graph, per-fan cards, RPM history and a fan boost with selectable duration (admin, gentle ramp)
@@ -102,7 +102,7 @@ Pure Swift/SwiftUI with no external dependencies, built with `swiftc`:
 - UI updates every **5 seconds**; disk every ~30s; IPs and battery every ~60s
 - SMC key info is **cached**; temperature keys probed **once per launch**
 - Published properties only update **when values change**
-- Metric history lives in a separate store, so sparkline updates **do not redraw the whole widget**
+- Metric history lives in a separate store, so the Thermals graphs **do not redraw the whole widget**
 - Process lists refresh only while a detail view is open; menu stats only while the menu is open (and they actually update live while it is open)
 - GPU is read only while the menu is open
 
@@ -121,7 +121,7 @@ MacMonitor/
 ├── MacMonitor/
 │   ├── MacMonitorApp.swift      # App entry, window, menu bar, keep awake, resizing
 │   ├── ContentView.swift        # Gauge grid, process lists, disk cleanup, thermals
-│   ├── Components.swift         # TickGauge, Sparkline, HistoryGraph, HistoryStore
+│   ├── Components.swift         # TickGauge, HistoryGraph, HistoryStore, DetailHeader
 │   ├── SystemMonitor.swift      # Metrics engine, alerts, purge, themes
 │   ├── DiskCleaner.swift        # Disk cleanup engine (19 categories)
 │   ├── FanHelper.swift          # Admin fan control helper (separate binary)
