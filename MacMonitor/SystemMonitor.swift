@@ -99,7 +99,10 @@ class SystemMonitor: ObservableObject {
 
     // Fan monitoring
     @Published var fans: [FanInfo] = []
-    @Published var fanHistory: [[Double]] = []   // RPM history per fan, last 60 readings
+
+    // Rolling CPU/RAM/temp/fan history for sparklines and detail graphs.
+    // Separate observable object so per-tick appends only redraw the graphs.
+    let history = HistoryStore()
 
     // Fan boost state
     @Published var fanBoostActive: Bool = false
@@ -222,18 +225,12 @@ class SystemMonitor: ObservableObject {
                 // Update fan data only when it actually changed
                 if self.fans != fanData { self.fans = fanData }
 
-                // Append to history (keep last 60 readings), skip on fanless Macs
-                if !fanData.isEmpty {
-                    if self.fanHistory.count != fanData.count {
-                        self.fanHistory = fanData.map { _ in [] }
-                    }
-                    for (i, fan) in fanData.enumerated() {
-                        self.fanHistory[i].append(fan.actualRPM)
-                        if self.fanHistory[i].count > 60 {
-                            self.fanHistory[i].removeFirst()
-                        }
-                    }
-                }
+                self.history.append(
+                    cpu: roundedCPU,
+                    ram: roundedUsed,
+                    temp: roundedTemp,
+                    fans: fanData.map { $0.actualRPM }
+                )
             }
         }
     }
@@ -445,7 +442,7 @@ class SystemMonitor: ObservableObject {
             let result = merged
                 .map { ProcessEntry(name: $0.key, value: $0.value) }
                 .sorted { $0.value > $1.value }
-                .prefix(8)
+                .prefix(10)
             self.publishOnMain { self.topRAMProcesses = Array(result) }
         }
     }
@@ -464,7 +461,7 @@ class SystemMonitor: ObservableObject {
             let result = merged
                 .map { ProcessEntry(name: $0.key, value: $0.value) }
                 .sorted { $0.value > $1.value }
-                .prefix(8)
+                .prefix(10)
             self.publishOnMain { self.topCPUProcesses = Array(result) }
         }
     }

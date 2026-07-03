@@ -29,7 +29,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         NSApp.setActivationPolicy(.accessory)
         setupStatusBar()
 
-        let size = NSSize(width: 300, height: 320)
+        let size = NSSize(width: UILayout.width, height: UILayout.mainHeight(hasBattery: false))
 
         window = NSWindow(
             contentRect: NSRect(origin: .zero, size: size),
@@ -95,7 +95,36 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             UserDefaults.standard.set(origin.y, forKey: "windowY")
         }
 
+        // Resize requests from SwiftUI when switching between grid and detail
+        NotificationCenter.default.addObserver(
+            forName: .mmResizeWindow,
+            object: nil,
+            queue: .main
+        ) { [weak self] note in
+            guard let height = note.userInfo?["height"] as? CGFloat else { return }
+            self?.resizeWindow(to: height)
+        }
+
         window.orderFrontRegardless()
+    }
+
+    /// Animates the window to a new height. The bottom edge stays anchored
+    /// (widgets usually sit near the bottom of the screen) and the frame is
+    /// clamped into the visible screen area.
+    private func resizeWindow(to height: CGFloat) {
+        guard window.frame.height != height else { return }
+        var frame = window.frame
+        frame.size.height = height
+        if let screen = window.screen ?? NSScreen.main {
+            let visible = screen.visibleFrame
+            if frame.maxY > visible.maxY { frame.origin.y -= frame.maxY - visible.maxY }
+            if frame.origin.y < visible.minY { frame.origin.y = visible.minY }
+        }
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = 0.28
+            ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            window.animator().setFrame(frame, display: true)
+        }
     }
 
     /// Creates a stretchable mask image for NSVisualEffectView — clean rounded corners

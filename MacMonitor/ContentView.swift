@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 enum DetailMode {
     case none, cpu, ram, disk, fan
@@ -7,28 +8,31 @@ enum DetailMode {
 struct ContentView: View {
     @ObservedObject var monitor: SystemMonitor
     @State private var detail: DetailMode = .none
+    @Namespace private var ringNS
 
     private var tc: ThemeColors { monitor.theme.colors }
+    private let detailAnimation = Animation.spring(response: 0.32, dampingFraction: 0.86)
 
     var body: some View {
         Group {
             switch detail {
             case .none:
                 gaugeGrid
-                    .transition(.opacity.combined(with: .scale(scale: 0.95)))
+                    .transition(.opacity)
             case .ram:
                 ProcessListView(
-                    title: "Memory Usage",
+                    title: "Memory",
                     subtitle: String(format: "%.1f / %.0f GB", monitor.usedRAM, monitor.totalRAM),
+                    percent: monitor.totalRAM > 0 ? monitor.usedRAM / monitor.totalRAM : 0,
+                    ringColor: tc.ring,
+                    matchID: "ring-ram",
+                    ns: ringNS,
                     processes: monitor.topRAMProcesses,
                     formatValue: { formatMB($0) },
                     barColor: { self.processBarColor($0, thresholds: (200, 500)) },
                     maxValue: monitor.totalRAM * 1024,
                     accent: tc.accent,
-                    onBack: {
-                        monitor.activeDetail = "none"
-                        withAnimation(.easeInOut(duration: 0.25)) { detail = .none }
-                    },
+                    onBack: { closeDetail() },
                     actionIcon: "bolt.fill",
                     actionLabel: "Quick",
                     onAction: { done in monitor.quickPurgeRAM(completion: done) },
@@ -36,90 +40,145 @@ struct ContentView: View {
                     secondaryLabel: "Purge",
                     onSecondaryAction: { done in monitor.purgeRAM(completion: done) }
                 )
-                .transition(.move(edge: .trailing).combined(with: .opacity))
+                .transition(.opacity)
             case .cpu:
                 ProcessListView(
-                    title: "CPU Usage",
+                    title: "CPU",
                     subtitle: String(format: "%.0f%%", monitor.cpuUsage),
+                    percent: monitor.cpuUsage / 100,
+                    ringColor: tc.ring,
+                    matchID: "ring-cpu",
+                    ns: ringNS,
                     processes: monitor.topCPUProcesses,
                     formatValue: { String(format: "%.1f%%", $0) },
                     barColor: { self.processBarColor($0, thresholds: (15, 50)) },
                     maxValue: 100,
                     accent: tc.accent,
-                    onBack: {
-                        monitor.activeDetail = "none"
-                        withAnimation(.easeInOut(duration: 0.25)) { detail = .none }
-                    }
+                    onBack: { closeDetail() }
                 )
-                .transition(.move(edge: .trailing).combined(with: .opacity))
+                .transition(.opacity)
             case .disk:
                 DiskCleanupView(
                     cleaner: monitor.diskCleaner,
                     accent: tc.accent,
                     diskColor: tc.disk,
-                    onBack: {
-                        monitor.activeDetail = "none"
-                        withAnimation(.easeInOut(duration: 0.25)) { detail = .none }
-                    },
+                    diskPercent: monitor.diskPercent / 100,
+                    diskLabel: monitor.diskLabel,
+                    matchID: "ring-disk",
+                    ns: ringNS,
+                    onBack: { closeDetail() },
                     onCleanComplete: { monitor.refreshDisk() }
                 )
-                .transition(.move(edge: .trailing).combined(with: .opacity))
+                .transition(.opacity)
             case .fan:
-                FanDetailView(
+                ThermalsView(
                     fans: monitor.fans,
-                    history: monitor.fanHistory,
+                    history: monitor.history,
                     accent: tc.accent,
                     tempColor: tc.temp,
                     currentTemp: monitor.cpuTemp,
                     boostActive: monitor.fanBoostActive,
                     boostSeconds: monitor.fanBoostSecondsRemaining,
                     cooldownSeconds: monitor.fanBoostCooldownRemaining,
-                    onBack: {
-                        monitor.activeDetail = "none"
-                        withAnimation(.easeInOut(duration: 0.25)) { detail = .none }
-                    },
+                    matchID: "ring-temp",
+                    ns: ringNS,
+                    onBack: { closeDetail() },
                     onBoost: { done in monitor.boostFans(completion: done) }
                 )
-                .transition(.move(edge: .trailing).combined(with: .opacity))
+                .transition(.opacity)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.clear)
+        .onChange(of: detail) { newDetail in
+            let height = newDetail == .none
+                ? UILayout.mainHeight(hasBattery: false)
+                : UILayout.detailHeight
+            NotificationCenter.default.post(
+                name: .mmResizeWindow, object: nil, userInfo: ["height": height]
+            )
+        }
+        .onAppear {
+            // Dev hook: open MacMonitor.app --args -debugDetail cpu|ram|disk|fan
+            switch UserDefaults.standard.string(forKey: "debugDetail") {
+            case "cpu":
+                monitor.fetchTopCPUProcesses()
+                monitor.activeDetail = "cpu"
+                detail = .cpu
+            case "ram":
+                monitor.fetchTopRAMProcesses()
+                monitor.activeDetail = "ram"
+                detail = .ram
+            case "disk":
+                detail = .disk
+            case "fan":
+                detail = .fan
+            default:
+                break
+            }
+        }
+    }
+
+    private func closeDetail() {
+        monitor.activeDetail = "none"
+        withAnimation(detailAnimation) { detail = .none }
     }
 
     var gaugeGrid: some View {
         VStack(spacing: 0) {
-            // Gauge rows — generous spacing between rings
-            VStack(spacing: 28) {
+            // Gauge rows, each cell pairs a ring with a small secondary slot
+            VStack(spacing: 22) {
                 HStack {
-                    GaugeCell(
-                        icon: "cpu",
-                        label: "CPU",
-                        value: String(format: "%.0f%%", monitor.cpuUsage),
-                        percent: monitor.cpuUsage / 100,
-                        color: tc.ring,
-                        tappable: true
+                    gaugeColumn(
+                        help: "CPU usage. Click for top processes.",
+                        a11y: String(format: "CPU usage %.0f percent", monitor.cpuUsage),
+                        onTap: {
+                            monitor.fetchTopCPUProcesses()
+                            monitor.activeDetail = "cpu"
+                            withAnimation(detailAnimation) { detail = .cpu }
+                        },
+                        gauge: {
+                            GaugeCell(
+                                icon: "cpu",
+                                value: String(format: "%.0f%%", monitor.cpuUsage),
+                                percent: monitor.cpuUsage / 100,
+                                color: tc.ring,
+                                tappable: true,
+                                matchID: "ring-cpu",
+                                ns: ringNS
+                            )
+                        },
+                        secondary: {
+                            Sparkline(store: monitor.history, metric: .cpu, maxValue: 100, color: tc.ring)
+                                .frame(width: 64, height: 14)
+                        }
                     )
-                    .onTapGesture {
-                        monitor.fetchTopCPUProcesses()
-                        monitor.activeDetail = "cpu"
-                        withAnimation(.easeInOut(duration: 0.25)) { detail = .cpu }
-                    }
 
-                    GaugeCell(
-                        icon: "memorychip",
-                        label: "Memory",
-                        value: String(format: "%.1fG", monitor.usedRAM),
-                        percent: monitor.totalRAM > 0 ? monitor.usedRAM / monitor.totalRAM : 0,
-                        color: tc.ring,
-                        tappable: true,
-                        dropBounce: monitor.purgeJustCompleted
+                    gaugeColumn(
+                        help: "Memory usage. Click for top processes and cleanup.",
+                        a11y: String(format: "Memory %.1f of %.0f gigabytes", monitor.usedRAM, monitor.totalRAM),
+                        onTap: {
+                            monitor.fetchTopRAMProcesses()
+                            monitor.activeDetail = "ram"
+                            withAnimation(detailAnimation) { detail = .ram }
+                        },
+                        gauge: {
+                            GaugeCell(
+                                icon: "memorychip",
+                                value: String(format: "%.1fG", monitor.usedRAM),
+                                percent: monitor.totalRAM > 0 ? monitor.usedRAM / monitor.totalRAM : 0,
+                                color: tc.ring,
+                                tappable: true,
+                                dropBounce: monitor.purgeJustCompleted,
+                                matchID: "ring-ram",
+                                ns: ringNS
+                            )
+                        },
+                        secondary: {
+                            Sparkline(store: monitor.history, metric: .ram, maxValue: max(monitor.totalRAM, 1), color: tc.ring)
+                                .frame(width: 64, height: 14)
+                        }
                     )
-                    .onTapGesture {
-                        monitor.fetchTopRAMProcesses()
-                        monitor.activeDetail = "ram"
-                        withAnimation(.easeInOut(duration: 0.25)) { detail = .ram }
-                    }
                     .onChange(of: monitor.purgeJustCompleted) { newVal in
                         if newVal {
                             DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
@@ -130,28 +189,63 @@ struct ContentView: View {
                 }
 
                 HStack {
-                    GaugeCell(
-                        icon: "internaldrive",
-                        label: "Disk",
-                        value: monitor.diskLabel,
-                        percent: monitor.diskPercent / 100,
-                        color: tc.disk,
-                        tappable: true
+                    gaugeColumn(
+                        help: "Disk usage. Click to scan and clean junk files.",
+                        a11y: String(format: "Disk %.0f percent full", monitor.diskPercent),
+                        onTap: {
+                            withAnimation(detailAnimation) { detail = .disk }
+                        },
+                        gauge: {
+                            GaugeCell(
+                                icon: "internaldrive",
+                                value: monitor.diskLabel,
+                                percent: monitor.diskPercent / 100,
+                                color: tc.disk,
+                                tappable: true,
+                                matchID: "ring-disk",
+                                ns: ringNS
+                            )
+                        },
+                        secondary: {
+                            DiskCleanableBadge(cleaner: monitor.diskCleaner, accent: tc.accent)
+                        }
                     )
-                    .onTapGesture {
-                        withAnimation(.easeInOut(duration: 0.25)) { detail = .disk }
-                    }
-                    GaugeCell(
-                        icon: "thermometer.medium",
-                        label: "Temp",
-                        value: monitor.cpuTemp > 0 ? String(format: "%.0f°C", monitor.cpuTemp) : "--",
-                        percent: monitor.cpuTemp > 0 ? min(monitor.cpuTemp / 100, 1.0) : 0,
-                        color: tc.temp,
-                        tappable: true
+
+                    gaugeColumn(
+                        help: "CPU temperature. Click for thermals and fan control.",
+                        a11y: monitor.cpuTemp > 0
+                            ? String(format: "CPU temperature %.0f degrees", monitor.cpuTemp)
+                            : "CPU temperature unavailable",
+                        onTap: {
+                            withAnimation(detailAnimation) { detail = .fan }
+                        },
+                        gauge: {
+                            GaugeCell(
+                                icon: "thermometer.medium",
+                                value: monitor.cpuTemp > 0 ? String(format: "%.0f°C", monitor.cpuTemp) : "--",
+                                percent: monitor.cpuTemp > 0 ? min(monitor.cpuTemp / 100, 1.0) : 0,
+                                color: tc.temp,
+                                tappable: true,
+                                matchID: "ring-temp",
+                                ns: ringNS
+                            )
+                        },
+                        secondary: {
+                            if monitor.fans.isEmpty {
+                                Sparkline(store: monitor.history, metric: .temp, maxValue: 0, color: tc.temp)
+                                    .frame(width: 64, height: 14)
+                            } else {
+                                HStack(spacing: 3) {
+                                    Image(systemName: "fan.fill")
+                                        .font(.system(size: 8))
+                                    // String(format:) avoids locale digit grouping in Text
+                                    Text(String(format: "%d rpm", Int(avgFanRPM)))
+                                        .font(.system(size: 9, weight: .semibold, design: .rounded))
+                                }
+                                .foregroundStyle(tc.temp.opacity(0.65))
+                            }
+                        }
                     )
-                    .onTapGesture {
-                        withAnimation(.easeInOut(duration: 0.25)) { detail = .fan }
-                    }
                 }
             }
 
@@ -217,6 +311,34 @@ struct ContentView: View {
         .padding(20)
     }
 
+    // Ring plus secondary slot in a fixed-height column; the whole column is
+    // one tap target and one accessibility element.
+    private func gaugeColumn<G: View, S: View>(
+        help: String,
+        a11y: String,
+        onTap: @escaping () -> Void,
+        @ViewBuilder gauge: () -> G,
+        @ViewBuilder secondary: () -> S
+    ) -> some View {
+        VStack(spacing: 6) {
+            gauge()
+            secondary()
+                .frame(height: 14)
+        }
+        .frame(maxWidth: .infinity)
+        .contentShape(Rectangle())
+        .onTapGesture(perform: onTap)
+        .help(help)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(a11y)
+        .accessibilityAddTraits(.isButton)
+    }
+
+    private var avgFanRPM: Double {
+        guard !monitor.fans.isEmpty else { return 0 }
+        return monitor.fans.map { $0.actualRPM }.reduce(0, +) / Double(monitor.fans.count)
+    }
+
     func processBarColor(_ value: Double, thresholds: (Double, Double)) -> Color {
         if value >= thresholds.1 { return Color(red: 0.9, green: 0.3, blue: 0.3) }
         if value >= thresholds.0 { return Color(red: 0.95, green: 0.65, blue: 0.3) }
@@ -246,6 +368,10 @@ struct ContentView: View {
 struct ProcessListView: View {
     let title: String
     let subtitle: String
+    let percent: Double
+    let ringColor: Color
+    let matchID: String
+    let ns: Namespace.ID
     let processes: [ProcessEntry]
     let formatValue: (Double) -> String
     let barColor: (Double) -> Color
@@ -269,28 +395,15 @@ struct ProcessListView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Header
-            HStack {
-                Button(action: onBack) {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.6))
-                        .frame(width: 32, height: 32)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-
-                Text(title)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.9))
-
-                Spacer()
-
-                Text(subtitle)
-                    .font(.system(size: 10, weight: .bold, design: .rounded))
-                    .foregroundStyle(accent)
-            }
-            .padding(.bottom, 10)
+            DetailHeader(
+                title: title,
+                value: subtitle,
+                percent: percent,
+                color: ringColor,
+                matchID: matchID,
+                ns: ns,
+                onBack: onBack
+            )
 
             // Section label
             Text("TOP PROCESSES")
@@ -474,12 +587,13 @@ struct ProcessListView: View {
 // MARK: - Gauge Cell
 struct GaugeCell: View {
     let icon: String
-    let label: String
     let value: String
     let percent: Double
     let color: Color
     var tappable: Bool = false
     var dropBounce: Bool = false
+    let matchID: String
+    let ns: Namespace.ID
 
     @State private var glowPhase: Bool = false
     @State private var isHovered = false
@@ -511,15 +625,9 @@ struct GaugeCell: View {
                     .animation(.easeOut(duration: 0.3), value: isHovered)
             }
 
-            Circle()
-                .stroke(Color.white.opacity(0.06), lineWidth: 6)
-
-            Circle()
-                .trim(from: 0, to: CGFloat(min(max(percent, 0), 1.0)))
-                .stroke(color, style: StrokeStyle(lineWidth: 6, lineCap: .round))
-                .rotationEffect(.degrees(-90))
-                .animation(.easeInOut(duration: 0.6), value: percent)
-                .shadow(color: tappable ? color.opacity(glowPhase ? 0.5 : 0.2) : .clear, radius: glowPhase ? 6 : 3)
+            RingGauge(percent: percent, color: color, lineWidth: 6)
+                .matchedGeometryEffect(id: matchID, in: ns)
+                .shadow(color: tappable ? color.opacity(0.3) : .clear, radius: 5)
 
             VStack(spacing: 1) {
                 Image(systemName: icon)
@@ -537,13 +645,12 @@ struct GaugeCell: View {
         .scaleEffect(isHovered && tappable ? 1.06 : bounceScale)
         .offset(y: bounceOffset)
         .animation(.easeOut(duration: 0.2), value: isHovered)
-        .frame(maxWidth: .infinity)
-        .contentShape(Rectangle())
         .onHover { hovering in
             isHovered = hovering
         }
         .onAppear {
-            if tappable {
+            // Respect the system Reduce Motion setting: skip the breathing glow
+            if tappable && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
                 glowPhase = true
             }
         }
@@ -562,6 +669,27 @@ struct GaugeCell: View {
                     }
                 }
             }
+        }
+    }
+}
+
+// MARK: - Disk Cleanable Badge
+
+/// Small badge under the disk gauge showing how much space a scan found.
+/// Observes the cleaner directly so scan results appear without a grid redraw.
+struct DiskCleanableBadge: View {
+    @ObservedObject var cleaner: DiskCleaner
+    let accent: Color
+
+    var body: some View {
+        if cleaner.hasScanned && cleaner.totalCleanableSize > 100_000_000 {
+            HStack(spacing: 3) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 8))
+                Text(DiskCleaner.formatSize(cleaner.totalCleanableSize))
+                    .font(.system(size: 9, weight: .semibold, design: .rounded))
+            }
+            .foregroundStyle(accent.opacity(0.75))
         }
     }
 }
@@ -604,17 +732,19 @@ struct CopyableIPCell: View {
     }
 }
 
-// MARK: - Fan Detail View
+// MARK: - Thermals View
 
-struct FanDetailView: View {
+struct ThermalsView: View {
     let fans: [FanInfo]
-    let history: [[Double]]
+    @ObservedObject var history: HistoryStore
     let accent: Color
     let tempColor: Color
     let currentTemp: Double
     let boostActive: Bool
     let boostSeconds: Int
     let cooldownSeconds: Int
+    let matchID: String
+    let ns: Namespace.ID
     let onBack: () -> Void
     let onBoost: (@escaping (Bool) -> Void) -> Void
 
@@ -627,72 +757,72 @@ struct FanDetailView: View {
         fans.map { $0.maxRPM }.max() ?? 1
     }
 
-    private var avgRPM: Double {
-        guard !fans.isEmpty else { return 0 }
-        return fans.map { $0.actualRPM }.reduce(0, +) / Double(fans.count)
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Header
-            HStack {
-                Button(action: onBack) {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(.white.opacity(0.6))
-                        .frame(width: 32, height: 32)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
+            DetailHeader(
+                title: "Thermals",
+                value: currentTemp > 0 ? String(format: "%.0f°C", currentTemp) : "--",
+                percent: currentTemp > 0 ? min(currentTemp / 100, 1.0) : 0,
+                color: tempColor,
+                matchID: matchID,
+                ns: ns,
+                onBack: onBack
+            )
 
-                Text("Fan Speed")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.9))
-
-                Spacer()
-
-                Text(String(format: "%.0f°C", currentTemp))
-                    .font(.system(size: 10, weight: .bold, design: .rounded))
-                    .foregroundStyle(tempColor)
-            }
-            .padding(.bottom, 10)
-
-            if fans.isEmpty {
-                Spacer()
-                VStack(spacing: 10) {
-                    Image(systemName: "fan.slash")
-                        .font(.system(size: 24))
-                        .foregroundStyle(.white.opacity(0.2))
-                    Text("No fans detected")
-                        .font(.system(size: 11))
+            ScrollView(.vertical, showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 10) {
+                    // Temperature history
+                    if history.temp.count > 1 {
+                        sectionLabel("CPU TEMPERATURE")
+                        HistoryGraph(series: [history.temp], maxValue: 0, color: tempColor)
+                            .frame(height: 56)
+                        HStack {
+                            Text(String(format: "min %.0f°", history.temp.min() ?? 0))
+                            Spacer()
+                            Text(String(format: "max %.0f°", history.temp.max() ?? 0))
+                        }
+                        .font(.system(size: 9, design: .rounded))
                         .foregroundStyle(.white.opacity(0.3))
-                }
-                .frame(maxWidth: .infinity)
-                Spacer()
-            } else {
-                ScrollView(.vertical, showsIndicators: false) {
-                    VStack(spacing: 10) {
-                        // Fan cards
+                    } else if currentTemp <= 0 {
+                        HStack(spacing: 6) {
+                            Image(systemName: "thermometer.medium.slash")
+                                .font(.system(size: 11))
+                                .foregroundStyle(.white.opacity(0.25))
+                            Text("No readable temperature sensor on this Mac.")
+                                .font(.system(size: 10))
+                                .foregroundStyle(.white.opacity(0.35))
+                        }
+                        .padding(.vertical, 6)
+                    }
+
+                    if fans.isEmpty {
+                        HStack(spacing: 6) {
+                            Image(systemName: "fan.slash")
+                                .font(.system(size: 11))
+                                .foregroundStyle(.white.opacity(0.25))
+                            Text("This Mac is passively cooled (no fans).")
+                                .font(.system(size: 10))
+                                .foregroundStyle(.white.opacity(0.35))
+                        }
+                        .padding(.top, 4)
+                    } else {
+                        sectionLabel("FANS")
+                            .padding(.top, 4)
                         ForEach(fans) { fan in
                             fanCard(fan)
                         }
 
-                        // RPM Graph
-                        if !history.isEmpty && history.first?.count ?? 0 > 1 {
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text("RPM HISTORY")
-                                    .font(.system(size: 9, weight: .bold))
-                                    .foregroundStyle(.white.opacity(0.25))
-                                    .padding(.leading, 2)
-
-                                RPMGraph(history: history, maxRPM: maxRPM, color: accent)
-                                    .frame(height: 60)
-                            }
+                        if history.fanRPM.first?.count ?? 0 > 1 {
+                            sectionLabel("RPM HISTORY")
+                                .padding(.top, 4)
+                            HistoryGraph(series: history.fanRPM, maxValue: maxRPM, color: accent)
+                                .frame(height: 56)
                         }
                     }
                 }
+            }
 
-                // Action bar
+            if !fans.isEmpty {
                 actionBar
             }
         }
@@ -705,6 +835,13 @@ struct FanDetailView: View {
                 }
             }
         }
+    }
+
+    private func sectionLabel(_ title: String) -> some View {
+        Text(title)
+            .font(.system(size: 9, weight: .bold))
+            .foregroundStyle(.white.opacity(0.25))
+            .padding(.leading, 2)
     }
 
     private func fanCard(_ fan: FanInfo) -> some View {
@@ -831,58 +968,16 @@ struct FanDetailView: View {
     }
 }
 
-// MARK: - RPM Graph
-
-struct RPMGraph: View {
-    let history: [[Double]]
-    let maxRPM: Double
-    let color: Color
-
-    var body: some View {
-        GeometryReader { geo in
-            ZStack {
-                // Grid lines
-                ForEach(0..<3, id: \.self) { i in
-                    let y = geo.size.height * CGFloat(i) / 2.0
-                    Path { path in
-                        path.move(to: CGPoint(x: 0, y: y))
-                        path.addLine(to: CGPoint(x: geo.size.width, y: y))
-                    }
-                    .stroke(Color.white.opacity(0.04), lineWidth: 0.5)
-                }
-
-                // Fan lines
-                ForEach(0..<history.count, id: \.self) { fanIdx in
-                    let data = history[fanIdx]
-                    if data.count > 1 {
-                        Path { path in
-                            let stepX = geo.size.width / CGFloat(max(data.count - 1, 1))
-                            for (i, rpm) in data.enumerated() {
-                                let x = stepX * CGFloat(i)
-                                let y = geo.size.height - (maxRPM > 0 ? geo.size.height * CGFloat(rpm / maxRPM) : 0)
-                                if i == 0 { path.move(to: CGPoint(x: x, y: y)) }
-                                else { path.addLine(to: CGPoint(x: x, y: y)) }
-                            }
-                        }
-                        .stroke(
-                            color.opacity(history.count > 1 ? (fanIdx == 0 ? 0.8 : 0.4) : 0.8),
-                            style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round)
-                        )
-                    }
-                }
-            }
-        }
-        .background(Color.white.opacity(0.02))
-        .cornerRadius(6)
-    }
-}
-
 // MARK: - Disk Cleanup View
 
 struct DiskCleanupView: View {
     @ObservedObject var cleaner: DiskCleaner
     let accent: Color
     let diskColor: Color
+    let diskPercent: Double
+    let diskLabel: String
+    let matchID: String
+    let ns: Namespace.ID
     let onBack: () -> Void
     var onCleanComplete: (() -> Void)? = nil
 
@@ -920,33 +1015,26 @@ struct DiskCleanupView: View {
 
     // MARK: - Header
 
+    private var headerValue: String {
+        if cleaner.hasScanned && !cleaner.isScanning && !cleaner.isCleaning && !cleaner.cleanJustCompleted {
+            return DiskCleaner.formatSize(cleaner.totalCleanableSize)
+        }
+        return diskLabel
+    }
+
     private var diskCleanupHeader: some View {
-        HStack {
-            Button(action: {
+        DetailHeader(
+            title: "Disk Cleanup",
+            value: headerValue,
+            percent: diskPercent,
+            color: diskColor,
+            matchID: matchID,
+            ns: ns,
+            onBack: {
                 cleaner.cleanJustCompleted = false
                 onBack()
-            }) {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.6))
-                    .frame(width: 32, height: 32)
-                    .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
-
-            Text("Disk Cleanup")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.9))
-
-            Spacer()
-
-            if cleaner.hasScanned && !cleaner.isScanning && !cleaner.isCleaning && !cleaner.cleanJustCompleted {
-                Text(DiskCleaner.formatSize(cleaner.totalCleanableSize))
-                    .font(.system(size: 10, weight: .bold, design: .rounded))
-                    .foregroundStyle(accent)
-            }
-        }
-        .padding(.bottom, 10)
+        )
     }
 
     // MARK: - Scan Prompt
