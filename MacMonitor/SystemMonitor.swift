@@ -109,7 +109,6 @@ class SystemMonitor: ObservableObject {
     // Fan boost state
     @Published var fanBoostActive: Bool = false
     @Published var fanBoostSecondsRemaining: Int = 0
-    @Published var fanBoostCooldownRemaining: Int = 0
     @Published var fanBoostNoEffect: Bool = false
 
     // Battery (portable Macs only; stays false on desktops)
@@ -144,13 +143,18 @@ class SystemMonitor: ObservableObject {
     private var smcKeyInfoCache: [UInt32: (dataSize: UInt32, dataType: UInt32)] = [:]
     private var fanCount: Int = -1  // -1 = not yet queried
     private var boostTimer: Timer?
-    private var cooldownTimer: Timer?
-    private let cooldownKey = "fanBoostCooldownEnd"
-    private static let boostDuration = 30  // seconds, full ramp-hold-ramp cycle
-    private static let boostPercent = 70   // percent into each fan's min-max band
+    private static let boostPercent = 75   // percent into each fan's min-max band
+    static let boostDurations = [15, 30, 45, 60, 120]  // seconds, user-selectable
+    private var currentBoostDuration = 30
     private var boostBaselineRPM: Double = 0
     private var boostPeakRPM: Double = 0
     private var memoryPressureActive = false
+
+    /// User-selected boost cycle length, persisted by the Thermals picker.
+    var boostDuration: Int {
+        let saved = UserDefaults.standard.integer(forKey: "boostDuration")
+        return Self.boostDurations.contains(saved) ? saved : 30
+    }
 
     init() {
         // Restore saved theme
@@ -167,7 +171,6 @@ class SystemMonitor: ObservableObject {
         updateNetworkSpeed() // seed initial bytes
         updatePing()
         updateIPs()
-        restoreCooldownState()
         let tick = Timer(timeInterval: 5.0, repeats: true) { [weak self] _ in
             guard let self = self else { return }
             self.tickCount += 1
@@ -206,7 +209,6 @@ class SystemMonitor: ObservableObject {
     deinit {
         timer?.invalidate()
         boostTimer?.invalidate()
-        cooldownTimer?.invalidate()
         if smcConn != 0 { IOServiceClose(smcConn) }
     }
 
@@ -978,7 +980,7 @@ class SystemMonitor: ObservableObject {
 
     // MARK: - Fan Boost
     func boostFans(completion: @escaping (Bool) -> Void) {
-        guard !fanBoostActive, fanBoostCooldownRemaining <= 0 else {
+        guard !fanBoostActive else {
             completion(false)
             return
         }
@@ -991,13 +993,15 @@ class SystemMonitor: ObservableObject {
             completion(false)
             return
         }
+        let duration = boostDuration
+        currentBoostDuration = duration
 
         // Quote the helper path for the shell, then escape for the AppleScript literal.
         // The trailing "&" detaches the helper so osascript returns right after auth,
         // which lets us tell a cancelled password prompt apart from a running boost.
         // The helper computes per-fan targets from the percent and ramps gently.
         let quotedPath = "'" + helperURL.path.replacingOccurrences(of: "'", with: "'\\''") + "'"
-        let shellCmd = "\(quotedPath) boost \(Self.boostPercent) \(Self.boostDuration) > /dev/null 2>&1 &"
+        let shellCmd = "\(quotedPath) boost \(Self.boostPercent) \(duration) > /dev/null 2>&1 &"
         let scriptSrc = shellCmd
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
@@ -1029,7 +1033,7 @@ class SystemMonitor: ObservableObject {
     private func startBoostCountdown() {
         fanBoostActive = true
         fanBoostNoEffect = false
-        fanBoostSecondsRemaining = Self.boostDuration
+        fanBoostSecondsRemaining = currentBoostDuration
         boostBaselineRPM = fans.map { $0.actualRPM }.max() ?? 0
         boostPeakRPM = boostBaselineRPM
         boostTimer?.invalidate()
@@ -1048,47 +1052,14 @@ class SystemMonitor: ObservableObject {
 
     private func finishBoost() {
         fanBoostActive = false
-        // Honest feedback: only start the cooldown if the fans actually
-        // sped up; otherwise report that the boost had no effect.
-        if boostPeakRPM >= boostBaselineRPM + 150 {
-            startCooldown()
-        } else {
+        // Honest feedback: if the fans never sped up, say so briefly.
+        // No cooldown afterwards: the admin prompt on every boost is enough
+        // of a rate limiter, and high fan speed itself is not harmful.
+        if boostPeakRPM < boostBaselineRPM + 150 {
             fanBoostNoEffect = true
             DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in
                 self?.fanBoostNoEffect = false
             }
         }
-    }
-
-    private func startCooldown() {
-        let cooldownDuration: TimeInterval = 15 * 60
-        let cooldownEnd = Date().addingTimeInterval(cooldownDuration)
-        UserDefaults.standard.set(cooldownEnd.timeIntervalSince1970, forKey: cooldownKey)
-        fanBoostCooldownRemaining = Int(cooldownDuration)
-        startCooldownTimer()
-    }
-
-    private func restoreCooldownState() {
-        let savedEnd = UserDefaults.standard.double(forKey: cooldownKey)
-        guard savedEnd > 0 else { return }
-        let remaining = savedEnd - Date().timeIntervalSince1970
-        if remaining > 0 {
-            fanBoostCooldownRemaining = Int(remaining)
-            startCooldownTimer()
-        }
-    }
-
-    private func startCooldownTimer() {
-        cooldownTimer?.invalidate()
-        let timer = Timer(timeInterval: 1, repeats: true) { [weak self] timer in
-            guard let self = self else { timer.invalidate(); return }
-            self.fanBoostCooldownRemaining -= 1
-            if self.fanBoostCooldownRemaining <= 0 {
-                timer.invalidate()
-                self.fanBoostCooldownRemaining = 0
-            }
-        }
-        RunLoop.main.add(timer, forMode: .common)
-        cooldownTimer = timer
     }
 }

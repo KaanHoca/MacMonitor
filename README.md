@@ -12,7 +12,7 @@ A lightweight, native macOS desktop widget that displays real-time system metric
 - **2x2 Circular Gauges** — CPU, Memory, Disk, Temperature with live sparklines and secondary info under each ring
 - **Live Ring Transitions** — tap a gauge and its ring flies into the detail header, staying live while the detail is open
 - **Dynamic Window Height** — the widget grows for detail views and shrinks back, bottom edge anchored
-- **Thermals View** — CPU temperature history graph, per-fan cards, RPM history and a 30s fan boost (admin)
+- **Thermals View** — CPU temperature history graph, per-fan cards, RPM history and a fan boost with selectable duration (admin, gentle ramp)
 - **Disk Cleanup** — scan and clean 19 categories of junk files safely; recoverable categories go to the Trash instead of being deleted
 - **Memory Cleanup** — Quick (no password) and Purge (admin); both report the actually measured freed amount
 - **Battery Info** — charge, health and cycle count on portable Macs (hidden on desktops)
@@ -47,7 +47,7 @@ open MacMonitor.app
 | **View processes** | Click the **CPU** or **Memory** gauge |
 | **Disk cleanup** | Click the **Disk** gauge to scan and clean junk files |
 | **Thermals and fans** | Click the **Temperature** gauge |
-| **Fan boost** | **Boost** button in Thermals (admin password, 30s, 15 min cooldown) |
+| **Fan boost** | **Boost** button in Thermals (admin password; pick 15s to 2m; gentle ramp up and down) |
 | **Go back** | Click **<** in the detail view |
 | **Quick memory clean** | **Quick** button in Memory detail (no password) |
 | **Deep memory purge** | **Purge** button in Memory detail (admin password) |

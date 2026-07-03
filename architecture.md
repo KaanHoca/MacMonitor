@@ -68,11 +68,13 @@ Rolling 60-sample (5 minute) buffers for CPU, RAM, temperature and fan RPM. It i
 `FanHelper` is a separate binary compiled without app frameworks. `SystemMonitor.boostFans`:
 
 1. Shell-quotes the helper path and escapes it for the AppleScript literal.
-2. Runs it via `osascript ... with administrator privileges` with a trailing `&` and redirection, so osascript returns right after authentication instead of blocking for the 30s boost.
-3. Starts the UI countdown and the 15-minute cooldown only when the exit status confirms authentication succeeded; a cancelled password prompt reverts cleanly.
-4. The helper itself sleeps for the boost duration and always reverts fans to automatic, even if the app quits.
+2. Runs it via `osascript ... with administrator privileges` with a trailing `&` and redirection, so osascript returns right after authentication instead of blocking for the boost cycle.
+3. Starts the UI countdown only when the exit status confirms authentication succeeded; a cancelled password prompt reverts cleanly.
+4. Tracks the peak RPM during the cycle; if the fans never sped up, the button reports "No effect".
 
-On Apple Silicon it sets the `FS!` force bits and writes `F*Tg` as float; on Intel it uses `F*Md` manual mode and `fpe2` encoding.
+Helper behavior (`boost <percent> <duration>`): SMC keys are introspected rather than guessed by architecture. Manual mode uses the per-fan `F*Md` key where present (modern Apple Silicon such as M4 has no `FS!` force-bits key) with `FS!` as fallback; targets are written in the encoding the SMC reports (`flt` or `fpe2`). Each fan's target is `percent` into its own min-max band, hard-capped at 90% of its absolute max. The cycle ramps up with smoothstep easing (up to 6s), holds, ramps down (up to 10s), then returns control to the automatic thermal controller. SIGINT/SIGTERM/SIGHUP handlers always revert to automatic mode, so fans can never stay stuck in manual control.
+
+The duration is user-selectable in the Thermals view (15/30/45/60/120s, persisted as `boostDuration`). There is deliberately no cooldown between boosts: the admin prompt on every run is the rate limiter, and sustained high fan speed is within the hardware's design envelope.
 
 ## Disk Cleanup Safety
 

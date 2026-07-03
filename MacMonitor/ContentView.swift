@@ -79,7 +79,6 @@ struct ContentView: View {
                     currentTemp: monitor.cpuTemp,
                     boostActive: monitor.fanBoostActive,
                     boostSeconds: monitor.fanBoostSecondsRemaining,
-                    cooldownSeconds: monitor.fanBoostCooldownRemaining,
                     boostNoEffect: monitor.fanBoostNoEffect,
                     matchID: "ring-temp",
                     ns: ringNS,
@@ -806,7 +805,6 @@ struct ThermalsView: View {
     let currentTemp: Double
     let boostActive: Bool
     let boostSeconds: Int
-    let cooldownSeconds: Int
     let boostNoEffect: Bool
     let matchID: String
     let ns: Namespace.ID
@@ -815,6 +813,7 @@ struct ThermalsView: View {
 
     @State private var boostState: BoostButtonState = .idle
     @State private var spinAngle: Double = 0
+    @AppStorage("boostDuration") private var boostDuration = 30
 
     enum BoostButtonState { case idle, running, done, failed }
 
@@ -957,23 +956,19 @@ struct ThermalsView: View {
 
     private var actionBar: some View {
         HStack {
-            // Cooldown or boost timer text
+            // Countdown while boosting, duration picker otherwise
             if boostActive {
-                Text("\(boostSeconds)s")
+                Text(countdownText)
                     .font(.system(size: 10, weight: .semibold, design: .rounded))
                     .foregroundStyle(accent.opacity(0.7))
-            } else if cooldownSeconds > 0 {
-                let min = cooldownSeconds / 60
-                let sec = cooldownSeconds % 60
-                Text(String(format: "%d:%02d", min, sec))
-                    .font(.system(size: 10, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.3))
+            } else {
+                durationMenu
             }
 
             Spacer()
 
             Button {
-                guard boostState == .idle, !boostActive, cooldownSeconds <= 0 else { return }
+                guard boostState == .idle, !boostActive else { return }
                 withAnimation { boostState = .running }
                 withAnimation(.linear(duration: 1).repeatForever(autoreverses: false)) {
                     spinAngle = 360
@@ -1017,23 +1012,64 @@ struct ThermalsView: View {
                 .cornerRadius(8)
             }
             .buttonStyle(.plain)
-            .disabled(boostState != .idle || boostActive || cooldownSeconds > 0)
+            .disabled(boostState != .idle || boostActive)
         }
         .padding(.top, 10)
+    }
+
+    private var countdownText: String {
+        boostSeconds >= 60
+            ? String(format: "%d:%02d", boostSeconds / 60, boostSeconds % 60)
+            : "\(boostSeconds)s"
+    }
+
+    private func durationLabel(_ seconds: Int) -> String {
+        seconds >= 60 ? "\(seconds / 60)m" : "\(seconds)s"
+    }
+
+    private var durationMenu: some View {
+        Menu {
+            ForEach(SystemMonitor.boostDurations, id: \.self) { d in
+                Button {
+                    boostDuration = d
+                } label: {
+                    if d == boostDuration {
+                        Label(durationLabel(d), systemImage: "checkmark")
+                    } else {
+                        Text(durationLabel(d))
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 3) {
+                Image(systemName: "timer")
+                    .font(.system(size: 8, weight: .semibold))
+                Text(durationLabel(boostDuration))
+                    .font(.system(size: 9, weight: .medium))
+            }
+            .foregroundStyle(.white.opacity(0.5))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .background(Color.white.opacity(0.06))
+            .cornerRadius(6)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .disabled(boostState != .idle)
+        .help("Boost duration")
     }
 
     private var boostLabel: String {
         if boostState == .done { return "Done" }
         if boostState == .failed { return "No effect" }
         if boostActive { return "Boosting" }
-        if cooldownSeconds > 0 { return "Cooldown" }
         return "Boost"
     }
 
     private var boostBackground: Color {
         if boostState == .done { return Color.green.opacity(0.3) }
         if boostState == .failed { return Color.orange.opacity(0.2) }
-        if cooldownSeconds > 0 { return Color.white.opacity(0.08) }
         return accent.opacity(0.3)
     }
 }
