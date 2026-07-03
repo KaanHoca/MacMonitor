@@ -210,7 +210,7 @@ struct ContentView: View {
                         gauge: {
                             GaugeCell(
                                 icon: "internaldrive",
-                                value: monitor.diskLabel,
+                                value: String(format: "%.0fG", monitor.diskUsed),
                                 percent: monitor.diskPercent / 100,
                                 color: tc.disk,
                                 warnAt: 0.90,
@@ -703,7 +703,8 @@ struct GaugeCell: View {
                     .minimumScaleFactor(0.5)
                     .lineLimit(1)
             }
-            .padding(.horizontal, 8)
+            // Capped to the dial's inner circle so text can never touch the ticks
+            .frame(maxWidth: 52)
             .animation(.easeOut(duration: 0.2), value: isHovered)
         }
         .frame(width: dialSize, height: dialSize)
