@@ -108,56 +108,6 @@ final class HistoryStore: ObservableObject {
     }
 }
 
-// MARK: - Sparkline
-
-/// Tiny trend line shown under a gauge. Newest sample sits at the right
-/// edge; the line grows leftwards until the history buffer is full.
-struct Sparkline: View {
-    enum Metric { case cpu, ram, temp }
-
-    @ObservedObject var store: HistoryStore
-    let metric: Metric
-    let maxValue: Double   // 0 = autoscale to the data range
-    let color: Color
-
-    private var data: [Double] {
-        switch metric {
-        case .cpu: return store.cpu
-        case .ram: return store.ram
-        case .temp: return store.temp
-        }
-    }
-
-    var body: some View {
-        GeometryReader { geo in
-            let values = data
-            if values.count > 1 {
-                let (lo, hi) = bounds(values)
-                let stepX = geo.size.width / CGFloat(HistoryStore.capacity - 1)
-                Path { p in
-                    for (i, v) in values.enumerated() {
-                        let x = geo.size.width - stepX * CGFloat(values.count - 1 - i)
-                        let norm = hi > lo ? min(max((v - lo) / (hi - lo), 0), 1) : 0.5
-                        let y = geo.size.height - geo.size.height * CGFloat(norm)
-                        if i == 0 { p.move(to: CGPoint(x: x, y: y)) }
-                        else { p.addLine(to: CGPoint(x: x, y: y)) }
-                    }
-                }
-                .stroke(color.opacity(0.45), style: StrokeStyle(lineWidth: 1, lineCap: .round, lineJoin: .round))
-            }
-        }
-    }
-
-    private func bounds(_ values: [Double]) -> (Double, Double) {
-        if maxValue > 0 { return (0, maxValue) }
-        let lo = values.min() ?? 0
-        let hi = values.max() ?? 1
-        // Pad the autoscaled band so a flat line does not hug the edges
-        let pad = max((hi - lo) * 0.2, 1)
-        return (lo - pad, hi + pad)
-    }
-}
-
 // MARK: - History Graph
 
 /// Multi-series line graph with faint horizontal grid lines, used in the

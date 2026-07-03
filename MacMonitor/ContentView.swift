@@ -136,8 +136,8 @@ struct ContentView: View {
 
     var gaugeGrid: some View {
         VStack(spacing: 0) {
-            // Gauge rows, each cell pairs a ring with a small secondary slot
-            VStack(spacing: 22) {
+            // Two symmetric dial rows; captions live inside the dials
+            VStack(spacing: 24) {
                 HStack {
                     gaugeColumn(
                         help: "CPU usage. Click for top processes.",
@@ -159,9 +159,6 @@ struct ContentView: View {
                                 matchID: "ring-cpu",
                                 ns: ringNS
                             )
-                        },
-                        secondary: {
-                            Sparkline(store: monitor.history, metric: .cpu, maxValue: 100, color: tc.ring)
                         }
                     )
 
@@ -186,9 +183,6 @@ struct ContentView: View {
                                 matchID: "ring-ram",
                                 ns: ringNS
                             )
-                        },
-                        secondary: {
-                            Sparkline(store: monitor.history, metric: .ram, maxValue: max(monitor.totalRAM, 1), color: tc.ring)
                         }
                     )
                     .onChange(of: monitor.purgeJustCompleted) { newVal in
@@ -216,15 +210,11 @@ struct ContentView: View {
                                 warnAt: 0.90,
                                 critAt: 0.97,
                                 tappable: true,
+                                caption: diskCaption,
+                                captionIcon: diskShowsCleanable ? "sparkles" : nil,
+                                captionColor: diskShowsCleanable ? tc.accent.opacity(0.8) : Color.white.opacity(0.35),
                                 matchID: "ring-disk",
                                 ns: ringNS
-                            )
-                        },
-                        secondary: {
-                            DiskCleanableBadge(
-                                cleaner: monitor.diskCleaner,
-                                accent: tc.accent,
-                                freeText: monitor.diskFree > 0 ? String(format: "%.0fG free", monitor.diskFree) : ""
                             )
                         }
                     )
@@ -246,23 +236,14 @@ struct ContentView: View {
                                 warnAt: 0.85,
                                 critAt: 0.95,
                                 tappable: true,
+                                caption: monitor.fans.isEmpty
+                                    ? nil
+                                    : String(format: "%d rpm", Int(avgFanRPM.rounded())),
+                                captionIcon: monitor.fans.isEmpty ? nil : "fan.fill",
+                                captionColor: tc.temp.opacity(0.7),
                                 matchID: "ring-temp",
                                 ns: ringNS
                             )
-                        },
-                        secondary: {
-                            if monitor.fans.isEmpty {
-                                Sparkline(store: monitor.history, metric: .temp, maxValue: 0, color: tc.temp)
-                            } else {
-                                HStack(spacing: 3) {
-                                    Image(systemName: "fan.fill")
-                                        .font(.system(size: 8))
-                                    // String(format:) avoids locale digit grouping in Text
-                                    Text(String(format: "%d rpm", Int(avgFanRPM.rounded())))
-                                        .font(.system(size: 9, weight: .semibold, design: .rounded))
-                                }
-                                .foregroundStyle(tc.temp.opacity(0.65))
-                            }
                         }
                     )
                 }
@@ -383,34 +364,38 @@ struct ContentView: View {
         }
     }
 
-    // Ring plus secondary slot in a fixed-height column; the whole column is
-    // one tap target and one accessibility element.
-    private func gaugeColumn<G: View, S: View>(
+    // One dial column: a single tap target and accessibility element.
+    private func gaugeColumn<G: View>(
         help: String,
         a11y: String,
         onTap: @escaping () -> Void,
-        @ViewBuilder gauge: () -> G,
-        @ViewBuilder secondary: () -> S
+        @ViewBuilder gauge: () -> G
     ) -> some View {
-        VStack(spacing: 6) {
-            gauge()
-            // Fixed slot: identical width and height in all four cells keeps
-            // the grid optically symmetric regardless of the content shown
-            secondary()
-                .frame(width: 76, height: 14)
-        }
-        .frame(maxWidth: .infinity)
-        .contentShape(Rectangle())
-        .onTapGesture(perform: onTap)
-        .help(help)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(a11y)
-        .accessibilityAddTraits(.isButton)
+        gauge()
+            .frame(maxWidth: .infinity)
+            .contentShape(Rectangle())
+            .onTapGesture(perform: onTap)
+            .help(help)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(a11y)
+            .accessibilityAddTraits(.isButton)
     }
 
     private var avgFanRPM: Double {
         guard !monitor.fans.isEmpty else { return 0 }
         return monitor.fans.map { $0.actualRPM }.reduce(0, +) / Double(monitor.fans.count)
+    }
+
+    // Disk dial caption: cleanable size once a scan ran, free space otherwise
+    private var diskShowsCleanable: Bool {
+        monitor.diskCleaner.hasScanned && monitor.diskCleaner.totalCleanableSize > 100_000_000
+    }
+
+    private var diskCaption: String? {
+        if diskShowsCleanable {
+            return DiskCleaner.formatSize(monitor.diskCleaner.totalCleanableSize)
+        }
+        return monitor.diskFree > 0 ? String(format: "%.0fG free", monitor.diskFree) : nil
     }
 
     func processBarColor(_ value: Double, thresholds: (Double, Double)) -> Color {
@@ -672,6 +657,9 @@ struct GaugeCell: View {
     var critAt: Double? = nil
     var tappable: Bool = false
     var dropBounce: Bool = false
+    var caption: String? = nil
+    var captionIcon: String? = nil
+    var captionColor: Color = Color.white.opacity(0.35)
     let matchID: String
     let ns: Namespace.ID
 
@@ -679,7 +667,7 @@ struct GaugeCell: View {
     @State private var bounceOffset: CGFloat = 0
     @State private var bounceScale: CGFloat = 1.0
 
-    private let dialSize: CGFloat = 80
+    private let dialSize: CGFloat = 100
 
     var body: some View {
         ZStack {
@@ -695,16 +683,29 @@ struct GaugeCell: View {
 
             VStack(spacing: 1) {
                 Image(systemName: icon)
-                    .font(.system(size: 11))
+                    .font(.system(size: 12))
                     .foregroundStyle(.white.opacity(isHovered && tappable ? 0.8 : 0.5))
                 Text(value)
-                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .font(.system(size: 15, weight: .semibold, design: .rounded))
                     .foregroundStyle(.white.opacity(0.9))
                     .minimumScaleFactor(0.5)
                     .lineLimit(1)
+                if let caption = caption {
+                    HStack(spacing: 2) {
+                        if let captionIcon = captionIcon {
+                            Image(systemName: captionIcon)
+                                .font(.system(size: 7))
+                        }
+                        Text(caption)
+                            .font(.system(size: 9, weight: .medium, design: .rounded))
+                            .lineLimit(1)
+                    }
+                    .foregroundStyle(captionColor)
+                    .padding(.top, 1)
+                }
             }
             // Capped to the dial's inner circle so text can never touch the ticks
-            .frame(maxWidth: 52)
+            .frame(maxWidth: 64)
             .animation(.easeOut(duration: 0.2), value: isHovered)
         }
         .frame(width: dialSize, height: dialSize)
@@ -732,32 +733,6 @@ struct GaugeCell: View {
     }
 }
 
-// MARK: - Disk Cleanable Badge
-
-/// Small badge under the disk gauge: cleanable size after a scan, free
-/// space beforehand. Observes the cleaner directly so scan results appear
-/// without a grid redraw.
-struct DiskCleanableBadge: View {
-    @ObservedObject var cleaner: DiskCleaner
-    let accent: Color
-    let freeText: String
-
-    var body: some View {
-        if cleaner.hasScanned && cleaner.totalCleanableSize > 100_000_000 {
-            HStack(spacing: 3) {
-                Image(systemName: "sparkles")
-                    .font(.system(size: 8))
-                Text(DiskCleaner.formatSize(cleaner.totalCleanableSize))
-                    .font(.system(size: 9, weight: .semibold, design: .rounded))
-            }
-            .foregroundStyle(accent.opacity(0.75))
-        } else if !freeText.isEmpty {
-            Text(freeText)
-                .font(.system(size: 9, weight: .medium, design: .rounded))
-                .foregroundStyle(.white.opacity(0.35))
-        }
-    }
-}
 
 // MARK: - Copyable IP Cell
 struct CopyableIPCell: View {
