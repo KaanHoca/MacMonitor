@@ -92,7 +92,7 @@ struct ContentView: View {
         .background(Color.clear)
         .onChange(of: detail) { newDetail in
             let height = newDetail == .none
-                ? UILayout.mainHeight(hasBattery: false)
+                ? UILayout.mainHeight(hasBattery: monitor.batteryPresent)
                 : UILayout.detailHeight
             NotificationCenter.default.post(
                 name: .mmResizeWindow, object: nil, userInfo: ["height": height]
@@ -307,8 +307,61 @@ struct ContentView: View {
                 )
             }
             .padding(.horizontal, 4)
+
+            // Battery row (portable Macs only)
+            if monitor.batteryPresent {
+                Spacer().frame(height: 8)
+                HStack(spacing: 5) {
+                    Image(systemName: batteryIcon)
+                        .font(.system(size: 10))
+                        .foregroundStyle(tc.accent.opacity(0.6))
+                    Text(String(format: "%.0f%%", monitor.batteryPercent))
+                        .font(.system(size: 10, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.75))
+                    if monitor.batteryCharging {
+                        Image(systemName: "bolt.fill")
+                            .font(.system(size: 8))
+                            .foregroundStyle(.yellow.opacity(0.8))
+                    }
+
+                    Spacer()
+
+                    if monitor.batteryHealth > 0 {
+                        HStack(spacing: 3) {
+                            Image(systemName: "heart")
+                                .font(.system(size: 9))
+                            Text(String(format: "%.0f%%", monitor.batteryHealth))
+                                .font(.system(size: 10, weight: .medium, design: .rounded))
+                        }
+                        .foregroundStyle(.white.opacity(0.45))
+                        .help("Battery health relative to design capacity")
+                    }
+                    if monitor.batteryCycles > 0 {
+                        HStack(spacing: 3) {
+                            Image(systemName: "arrow.triangle.2.circlepath")
+                                .font(.system(size: 9))
+                            Text(String(format: "%d", monitor.batteryCycles))
+                                .font(.system(size: 10, weight: .medium, design: .rounded))
+                        }
+                        .foregroundStyle(.white.opacity(0.45))
+                        .help("Battery cycle count")
+                    }
+                }
+                .padding(.horizontal, 4)
+            }
         }
         .padding(20)
+    }
+
+    private var batteryIcon: String {
+        if monitor.batteryCharging { return "battery.100.bolt" }
+        switch monitor.batteryPercent {
+        case 80...: return "battery.100"
+        case 55..<80: return "battery.75"
+        case 30..<55: return "battery.50"
+        case 10..<30: return "battery.25"
+        default: return "battery.0"
+        }
     }
 
     // Ring plus secondary slot in a fixed-height column; the whole column is
@@ -1124,9 +1177,15 @@ struct DiskCleanupView: View {
                 .font(.system(size: 20, weight: .bold, design: .rounded))
                 .foregroundStyle(.white.opacity(0.9))
 
-            Text("freed successfully")
+            Text("cleaned successfully")
                 .font(.system(size: 11))
                 .foregroundStyle(.white.opacity(0.5))
+
+            if cleaner.lastTrashedSize > 0 {
+                Text(DiskCleaner.formatSize(cleaner.lastTrashedSize) + " of it is in the Trash, recoverable")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.white.opacity(0.35))
+            }
 
             Button {
                 cleaner.cleanJustCompleted = false

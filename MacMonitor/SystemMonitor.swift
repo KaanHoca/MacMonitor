@@ -1,7 +1,9 @@
 import Foundation
 import Darwin
 import IOKit
+import IOKit.ps
 import SwiftUI
+import UserNotifications
 
 // MARK: - Theme
 
@@ -109,6 +111,13 @@ class SystemMonitor: ObservableObject {
     @Published var fanBoostSecondsRemaining: Int = 0
     @Published var fanBoostCooldownRemaining: Int = 0
 
+    // Battery (portable Macs only; stays false on desktops)
+    @Published var batteryPresent = false
+    @Published var batteryPercent: Double = 0
+    @Published var batteryCharging = false
+    @Published var batteryHealth: Double = 0   // percent of design capacity
+    @Published var batteryCycles: Int = 0
+
     // Disk cleaner instance — shared with ContentView
     let diskCleaner = DiskCleaner()
 
@@ -147,6 +156,8 @@ class SystemMonitor: ObservableObject {
             self.theme = .ocean
         }
         openSMC()
+        updateBattery()      // sync on main so the initial window height is right
+        readBatteryHealth()
         update(diskToo: true)
         updateNetworkSpeed() // seed initial bytes
         updatePing()
@@ -159,8 +170,11 @@ class SystemMonitor: ObservableObject {
             self.update(diskToo: self.tickCount % 6 == 0)
             self.updateNetworkSpeed()
             self.updatePing()
-            // IPs change rarely — check every ~60s (every 12th tick)
-            if self.tickCount % 12 == 0 { self.updateIPs() }
+            // IPs and battery change rarely — check every ~60s (every 12th tick)
+            if self.tickCount % 12 == 0 {
+                self.updateIPs()
+                self.updateBattery()
+            }
             // Auto-refresh process list while detail view is open
             if self.activeDetail == "cpu" { self.fetchTopCPUProcesses() }
             else if self.activeDetail == "ram" { self.fetchTopRAMProcesses() }
@@ -231,6 +245,8 @@ class SystemMonitor: ObservableObject {
                     temp: roundedTemp,
                     fans: fanData.map { $0.actualRPM }
                 )
+
+                self.checkThresholds()
             }
         }
     }
@@ -628,6 +644,156 @@ class SystemMonitor: ObservableObject {
             }
             completion(ip)
         }.resume()
+    }
+
+    // MARK: - Battery
+
+    private func updateBattery() {
+        guard let blob = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
+              let sources = IOPSCopyPowerSourcesList(blob)?.takeRetainedValue() as? [Any] else {
+            return
+        }
+        for source in sources {
+            guard let desc = IOPSGetPowerSourceDescription(blob, source as CFTypeRef)?
+                    .takeUnretainedValue() as? [String: Any],
+                  desc[kIOPSTypeKey] as? String == kIOPSInternalBatteryType else { continue }
+
+            let current = desc[kIOPSCurrentCapacityKey] as? Int ?? 0
+            let maxCap = desc[kIOPSMaxCapacityKey] as? Int ?? 100
+            let charging = desc[kIOPSIsChargingKey] as? Bool ?? false
+            let percent = maxCap > 0 ? Double(current) / Double(maxCap) * 100 : 0
+
+            publishOnMain {
+                if !self.batteryPresent { self.batteryPresent = true }
+                if self.batteryPercent != percent { self.batteryPercent = percent }
+                if self.batteryCharging != charging { self.batteryCharging = charging }
+            }
+            return
+        }
+    }
+
+    private func readBatteryHealth() {
+        let entry = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching("AppleSmartBattery"))
+        guard entry != 0 else { return }
+        defer { IOObjectRelease(entry) }
+
+        func intProp(_ key: String) -> Int? {
+            guard let ref = IORegistryEntryCreateCFProperty(entry, key as CFString, kCFAllocatorDefault, 0) else {
+                return nil
+            }
+            return (ref.takeRetainedValue() as? NSNumber)?.intValue
+        }
+
+        let cycles = intProp("CycleCount") ?? 0
+        let design = intProp("DesignCapacity") ?? 0
+        let nominal = intProp("NominalChargeCapacity") ?? intProp("AppleRawMaxCapacity") ?? 0
+        let health = (design > 0 && nominal > 0) ? min(Double(nominal) / Double(design) * 100, 100) : 0
+
+        publishOnMain {
+            if cycles > 0 { self.batteryCycles = cycles }
+            if health > 0 { self.batteryHealth = health }
+        }
+    }
+
+    // MARK: - Threshold Alerts
+
+    var alertsEnabled: Bool {
+        get {
+            if UserDefaults.standard.object(forKey: "alertsEnabled") == nil { return true }
+            return UserDefaults.standard.bool(forKey: "alertsEnabled")
+        }
+        set { UserDefaults.standard.set(newValue, forKey: "alertsEnabled") }
+    }
+
+    private var lastAlertDates: [String: Date] = [:]
+    private static let alertCooldown: TimeInterval = 3600
+
+    private func checkThresholds() {
+        guard alertsEnabled else { return }
+        if cpuTemp >= 100 {
+            maybeAlert(
+                key: "temp",
+                title: "High CPU Temperature",
+                body: String(format: "CPU is at %.0f°C. Heavy workloads or blocked vents can cause this.", cpuTemp)
+            )
+        }
+        if diskPercent >= 90 {
+            maybeAlert(
+                key: "disk",
+                title: "Disk Almost Full",
+                body: String(format: "Startup disk is %.0f%% full. Open Disk Cleanup in MacMonitor to free space.", diskPercent)
+            )
+        }
+    }
+
+    private func maybeAlert(key: String, title: String, body: String) {
+        let now = Date()
+        if let last = lastAlertDates[key], now.timeIntervalSince(last) < Self.alertCooldown { return }
+        lastAlertDates[key] = now
+        postNotification(title: title, body: body)
+    }
+
+    private func postNotification(title: String, body: String) {
+        guard Bundle.main.bundleIdentifier != nil else { return }
+        let center = UNUserNotificationCenter.current()
+        center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
+            guard granted else { return }
+            let content = UNMutableNotificationContent()
+            content.title = title
+            content.body = body
+            center.add(UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
+        }
+    }
+
+    // MARK: - GPU (read on demand, menu bar only)
+
+    func readGPUUsage() -> Double? {
+        var iterator = io_iterator_t()
+        guard IOServiceGetMatchingServices(kIOMainPortDefault,
+                                           IOServiceMatching("IOAccelerator"),
+                                           &iterator) == KERN_SUCCESS else {
+            return nil
+        }
+        defer { IOObjectRelease(iterator) }
+
+        var entry = IOIteratorNext(iterator)
+        while entry != 0 {
+            if let ref = IORegistryEntryCreateCFProperty(entry, "PerformanceStatistics" as CFString,
+                                                         kCFAllocatorDefault, 0),
+               let stats = ref.takeRetainedValue() as? [String: Any] {
+                for key in ["Device Utilization %", "GPU Activity(%)"] {
+                    if let value = stats[key] as? Int {
+                        IOObjectRelease(entry)
+                        return Double(value)
+                    }
+                }
+            }
+            IOObjectRelease(entry)
+            entry = IOIteratorNext(iterator)
+        }
+        return nil
+    }
+
+    // MARK: - Uptime & Load
+
+    func uptimeText() -> String {
+        var tv = timeval()
+        var size = MemoryLayout<timeval>.size
+        var mib: [Int32] = [CTL_KERN, KERN_BOOTTIME]
+        guard sysctl(&mib, 2, &tv, &size, nil, 0) == 0, tv.tv_sec > 0 else { return "--" }
+        let uptime = Int(Date().timeIntervalSince1970) - Int(tv.tv_sec)
+        let days = uptime / 86400
+        let hours = (uptime % 86400) / 3600
+        let mins = (uptime % 3600) / 60
+        if days > 0 { return "\(days)d \(hours)h" }
+        if hours > 0 { return "\(hours)h \(mins)m" }
+        return "\(mins)m"
+    }
+
+    func loadText() -> String {
+        var loads = [Double](repeating: 0, count: 3)
+        guard getloadavg(&loads, 3) == 3 else { return "--" }
+        return String(format: "%.2f  %.2f  %.2f", loads[0], loads[1], loads[2])
     }
 
     // MARK: - Temperature (SMC)

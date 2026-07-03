@@ -23,6 +23,7 @@ struct CleanupCategory: Identifiable {
     let defaultEnabled: Bool
     let paths: [CleanupPath]
     let detector: [String]     // paths to check if category is relevant on this system
+    var trashInstead: Bool = false  // recoverable delete: move to Trash instead of removing
 }
 
 // MARK: - Disk Cleaner
@@ -34,6 +35,7 @@ class DiskCleaner: ObservableObject {
     @Published var scanProgress: Double = 0
     @Published var cleanProgress: Double = 0
     @Published var lastCleanedSize: Int64 = 0
+    @Published var lastTrashedSize: Int64 = 0
     @Published var cleanJustCompleted = false
 
     let categories: [CleanupCategory] = DiskCleaner.buildCategories()
@@ -139,6 +141,7 @@ class DiskCleaner: ObservableObject {
         isCleaning = true
         cleanProgress = 0
         lastCleanedSize = 0
+        lastTrashedSize = 0
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self = self else { return }
@@ -146,44 +149,52 @@ class DiskCleaner: ObservableObject {
                 self.isCategoryAvailable($0) && self.isEnabled($0.id) && (self.sizes[$0.id] ?? 0) > 0
             }
             let total = enabledCats.count
-            var cleaned: Int64 = 0
+            var freed: Int64 = 0
+            var trashed: Int64 = 0
 
             for (index, cat) in enabledCats.enumerated() {
-                let freed = self.cleanCategory(cat)
-                cleaned += freed
+                let result = self.cleanCategory(cat)
+                freed += result.freed
+                trashed += result.trashed
                 DispatchQueue.main.async {
                     self.cleanProgress = Double(index + 1) / Double(max(total, 1))
-                    self.lastCleanedSize = cleaned
+                    self.lastCleanedSize = freed + trashed
+                    self.lastTrashedSize = trashed
                 }
             }
 
             DispatchQueue.main.async {
                 self.isCleaning = false
                 self.cleanProgress = 1.0
-                self.lastCleanedSize = cleaned
+                self.lastCleanedSize = freed + trashed
+                self.lastTrashedSize = trashed
                 self.cleanJustCompleted = true
 
                 // Re-scan to update sizes
                 self.scanAll()
 
-                completion(cleaned)
+                completion(freed + trashed)
             }
         }
     }
 
-    private func cleanCategory(_ category: CleanupCategory) -> Int64 {
+    private func cleanCategory(_ category: CleanupCategory) -> (freed: Int64, trashed: Int64) {
         var freed: Int64 = 0
+        var trashed: Int64 = 0
         for cleanupPath in category.paths {
             let expanded = expandPath(cleanupPath.path)
             guard fm.fileExists(atPath: expanded) else { continue }
 
+            let result: (freed: Int64, trashed: Int64)
             if let pattern = cleanupPath.pattern {
-                freed += removeMatchingFiles(in: expanded, pattern: pattern)
+                result = removeMatchingFiles(in: expanded, pattern: pattern, useTrash: category.trashInstead)
             } else {
-                freed += removeContents(of: expanded)
+                result = removeContents(of: expanded, useTrash: category.trashInstead)
             }
+            freed += result.freed
+            trashed += result.trashed
         }
-        return freed
+        return (freed, trashed)
     }
 
     // MARK: - File Operations
@@ -223,39 +234,54 @@ class DiskCleaner: ObservableObject {
         return total
     }
 
-    private func removeContents(of directory: String) -> Int64 {
-        guard isPathSafe(directory) else { return 0 }
-        guard let contents = try? fm.contentsOfDirectory(atPath: directory) else { return 0 }
+    private func removeContents(of directory: String, useTrash: Bool) -> (freed: Int64, trashed: Int64) {
+        guard isPathSafe(directory) else { return (0, 0) }
+        guard let contents = try? fm.contentsOfDirectory(atPath: directory) else { return (0, 0) }
         var freed: Int64 = 0
+        var trashed: Int64 = 0
         for name in contents {
             let fullPath = (directory as NSString).appendingPathComponent(name)
-            let size = sizeOfItemOrDir(fullPath)
-            do {
-                try fm.removeItem(atPath: fullPath)
-                freed += size
-            } catch {
-                // Skip items we can't remove (permission denied, in use, etc.)
-            }
+            let result = removeItemMeasured(fullPath, useTrash: useTrash)
+            freed += result.freed
+            trashed += result.trashed
         }
-        return freed
+        return (freed, trashed)
     }
 
-    private func removeMatchingFiles(in directory: String, pattern: String) -> Int64 {
-        guard let contents = try? fm.contentsOfDirectory(atPath: directory) else { return 0 }
+    private func removeMatchingFiles(in directory: String, pattern: String, useTrash: Bool) -> (freed: Int64, trashed: Int64) {
+        guard let contents = try? fm.contentsOfDirectory(atPath: directory) else { return (0, 0) }
         var freed: Int64 = 0
+        var trashed: Int64 = 0
         for name in contents where matchesPattern(name, pattern: pattern) {
             let fullPath = (directory as NSString).appendingPathComponent(name)
             // Check safety per file — allows /Applications/Install macOS*.app
             guard isPathSafe(fullPath) else { continue }
-            let size = sizeOfItemOrDir(fullPath)
+            let result = removeItemMeasured(fullPath, useTrash: useTrash)
+            freed += result.freed
+            trashed += result.trashed
+        }
+        return (freed, trashed)
+    }
+
+    /// Removes one item, returning how much was permanently freed vs moved
+    /// to Trash. Trash-designated items are never force-deleted on failure.
+    private func removeItemMeasured(_ fullPath: String, useTrash: Bool) -> (freed: Int64, trashed: Int64) {
+        let size = sizeOfItemOrDir(fullPath)
+        if useTrash {
             do {
-                try fm.removeItem(atPath: fullPath)
-                freed += size
+                try fm.trashItem(at: URL(fileURLWithPath: fullPath), resultingItemURL: nil)
+                return (0, size)
             } catch {
-                // Skip items we can't remove
+                return (0, 0)
             }
         }
-        return freed
+        do {
+            try fm.removeItem(atPath: fullPath)
+            return (size, 0)
+        } catch {
+            // Skip items we can't remove (permission denied, in use, etc.)
+            return (0, 0)
+        }
     }
 
     private func sizeOfItemOrDir(_ path: String) -> Int64 {
@@ -379,12 +405,13 @@ class DiskCleaner: ObservableObject {
                 id: "macosInstallers",
                 name: "macOS Installers",
                 icon: "arrow.down.app",
-                detail: "Old macOS installer apps (12+ GB each).",
+                detail: "Old macOS installer apps (12+ GB each). Moved to Trash so you can recover them.",
                 defaultEnabled: true,
                 paths: [
                     CleanupPath("/Applications", pattern: "Install macOS*.app", recursive: false),
                 ],
-                detector: []
+                detector: [],
+                trashInstead: true
             ),
             CleanupCategory(
                 id: "iosFirmware",
@@ -405,14 +432,15 @@ class DiskCleaner: ObservableObject {
                 id: "incompleteDownloads",
                 name: "Incomplete Downloads",
                 icon: "exclamationmark.arrow.circlepath",
-                detail: "Failed or interrupted download files.",
+                detail: "Failed or interrupted download files. Moved to Trash so you can recover them.",
                 defaultEnabled: true,
                 paths: [
                     CleanupPath("~/Downloads", pattern: "*.crdownload", recursive: false),
                     CleanupPath("~/Downloads", pattern: "*.download", recursive: false),
                     CleanupPath("~/Downloads", pattern: "*.part", recursive: false),
                 ],
-                detector: []
+                detector: [],
+                trashInstead: true
             ),
             CleanupCategory(
                 id: "quicklookCache",

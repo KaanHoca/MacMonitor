@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import ServiceManagement
+import IOKit.pwr_mgt
 
 @main
 struct MacMonitorApp: App {
@@ -22,14 +23,27 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var diskMenuItem: NSMenuItem!
     private var tempMenuItem: NSMenuItem!
     private var fanMenuItem: NSMenuItem!
+    private var gpuMenuItem: NSMenuItem!
+    private var uptimeMenuItem: NSMenuItem!
+    private var loadMenuItem: NSMenuItem!
     private var menuUpdateTimer: Timer?
     private var launchAtLoginItem: NSMenuItem!
+    private var alertsMenuItem: NSMenuItem!
+    private var keepAwakeItem: NSMenuItem!
+    private var menuBarTextItem: NSMenuItem!
+    private var statusTextTimer: Timer?
+    private var awakeAssertionID: IOPMAssertionID = 0
+
+    private var menuBarTextEnabled: Bool {
+        get { UserDefaults.standard.bool(forKey: "menuBarText") }
+        set { UserDefaults.standard.set(newValue, forKey: "menuBarText") }
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
         setupStatusBar()
 
-        let size = NSSize(width: UILayout.width, height: UILayout.mainHeight(hasBattery: false))
+        let size = NSSize(width: UILayout.width, height: UILayout.mainHeight(hasBattery: monitor.batteryPresent))
 
         window = NSWindow(
             contentRect: NSRect(origin: .zero, size: size),
@@ -175,12 +189,18 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         diskMenuItem = makeStatsItem("internaldrive", "Disk", "—")
         tempMenuItem = makeStatsItem("thermometer.medium", "Temp", "—")
         fanMenuItem = makeStatsItem("fan.fill", "Fan", "—")
+        gpuMenuItem = makeStatsItem("display", "GPU", "—")
+        uptimeMenuItem = makeStatsItem("clock", "Uptime", "—")
+        loadMenuItem = makeStatsItem("chart.bar", "Load", "—")
 
         menu.addItem(cpuMenuItem)
         menu.addItem(ramMenuItem)
         menu.addItem(diskMenuItem)
         menu.addItem(tempMenuItem)
         menu.addItem(fanMenuItem)
+        menu.addItem(gpuMenuItem)
+        menu.addItem(uptimeMenuItem)
+        menu.addItem(loadMenuItem)
 
         menu.addItem(NSMenuItem.separator())
 
@@ -201,6 +221,23 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         menu.addItem(NSMenuItem.separator())
 
+        // Threshold notifications (high temp, disk almost full)
+        alertsMenuItem = NSMenuItem(title: "Alerts", action: #selector(toggleAlerts), keyEquivalent: "")
+        alertsMenuItem.target = self
+        alertsMenuItem.state = monitor.alertsEnabled ? .on : .off
+        menu.addItem(alertsMenuItem)
+
+        // Keep Awake: prevents display and idle sleep while enabled
+        keepAwakeItem = NSMenuItem(title: "Keep Mac Awake", action: #selector(toggleKeepAwake), keyEquivalent: "")
+        keepAwakeItem.target = self
+        menu.addItem(keepAwakeItem)
+
+        // Compact live stats as menu bar text instead of the gauge icon
+        menuBarTextItem = NSMenuItem(title: "Stats in Menu Bar", action: #selector(toggleMenuBarText), keyEquivalent: "")
+        menuBarTextItem.target = self
+        menuBarTextItem.state = menuBarTextEnabled ? .on : .off
+        menu.addItem(menuBarTextItem)
+
         // Launch at Login
         launchAtLoginItem = NSMenuItem(title: "Launch at Login", action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
         launchAtLoginItem.target = self
@@ -214,6 +251,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(NSMenuItem(title: "Quit", action: #selector(quitApp), keyEquivalent: "q"))
 
         statusItem?.menu = menu
+
+        // Restore persisted menu bar text mode
+        applyStatusItemMode()
     }
 
     private func makeStatsItem(_ symbolName: String, _ label: String, _ value: String) -> NSMenuItem {
@@ -235,15 +275,28 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         diskMenuItem.title = "Disk:  \(disk)"
         tempMenuItem.title = "Temp:  \(temp)"
 
-        let fanText: String
         if monitor.fans.isEmpty {
-            fanText = "No fans"
-        } else if monitor.fans.count == 1 {
-            fanText = String(format: "%.0f RPM", monitor.fans[0].actualRPM)
+            fanMenuItem.isHidden = true
         } else {
-            fanText = monitor.fans.map { String(format: "%.0f", $0.actualRPM) }.joined(separator: " / ") + " RPM"
+            fanMenuItem.isHidden = false
+            let fanText: String
+            if monitor.fans.count == 1 {
+                fanText = String(format: "%.0f RPM", monitor.fans[0].actualRPM)
+            } else {
+                fanText = monitor.fans.map { String(format: "%.0f", $0.actualRPM) }.joined(separator: " / ") + " RPM"
+            }
+            fanMenuItem.title = "Fan:  \(fanText)"
         }
-        fanMenuItem.title = "Fan:  \(fanText)"
+
+        if let gpu = monitor.readGPUUsage() {
+            gpuMenuItem.isHidden = false
+            gpuMenuItem.title = String(format: "GPU:  %.0f%%", gpu)
+        } else {
+            gpuMenuItem.isHidden = true
+        }
+
+        uptimeMenuItem.title = "Uptime:  \(monitor.uptimeText())"
+        loadMenuItem.title = "Load:  \(monitor.loadText())"
     }
 
     // MARK: - NSMenuDelegate
@@ -265,6 +318,76 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     // MARK: - Actions
+
+    @objc private func toggleAlerts() {
+        monitor.alertsEnabled.toggle()
+        alertsMenuItem.state = monitor.alertsEnabled ? .on : .off
+    }
+
+    @objc private func toggleKeepAwake() {
+        if awakeAssertionID != 0 {
+            IOPMAssertionRelease(awakeAssertionID)
+            awakeAssertionID = 0
+            keepAwakeItem.state = .off
+        } else {
+            var assertionID = IOPMAssertionID(0)
+            let result = IOPMAssertionCreateWithName(
+                kIOPMAssertionTypePreventUserIdleDisplaySleep as CFString,
+                IOPMAssertionLevel(kIOPMAssertionLevelOn),
+                "MacMonitor Keep Awake" as CFString,
+                &assertionID
+            )
+            if result == kIOReturnSuccess {
+                awakeAssertionID = assertionID
+                keepAwakeItem.state = .on
+            } else {
+                showAlert("Could not enable Keep Awake.")
+            }
+        }
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        if awakeAssertionID != 0 { IOPMAssertionRelease(awakeAssertionID) }
+    }
+
+    // MARK: - Menu Bar Text Mode
+
+    @objc private func toggleMenuBarText() {
+        menuBarTextEnabled.toggle()
+        menuBarTextItem.state = menuBarTextEnabled ? .on : .off
+        applyStatusItemMode()
+    }
+
+    private func applyStatusItemMode() {
+        guard let button = statusItem?.button else { return }
+        statusTextTimer?.invalidate()
+        statusTextTimer = nil
+
+        if menuBarTextEnabled {
+            statusItem?.length = NSStatusItem.variableLength
+            button.image = nil
+            updateStatusText()
+            let timer = Timer(timeInterval: 5.0, repeats: true) { [weak self] _ in
+                self?.updateStatusText()
+            }
+            RunLoop.main.add(timer, forMode: .common)
+            statusTextTimer = timer
+        } else {
+            statusItem?.length = NSStatusItem.squareLength
+            button.attributedTitle = NSAttributedString(string: "")
+            button.image = NSImage(systemSymbolName: "gauge.with.dots.needle.33percent",
+                                   accessibilityDescription: "MacMonitor")
+        }
+    }
+
+    private func updateStatusText() {
+        guard let button = statusItem?.button else { return }
+        var parts = [String(format: "%.0f%%", monitor.cpuUsage)]
+        if monitor.cpuTemp > 0 { parts.append(String(format: "%.0f°", monitor.cpuTemp)) }
+        button.attributedTitle = NSAttributedString(string: parts.joined(separator: " "), attributes: [
+            .font: NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .medium)
+        ])
+    }
 
     @objc private func themeSelected(_ sender: NSMenuItem) {
         guard let rawValue = sender.representedObject as? String,
