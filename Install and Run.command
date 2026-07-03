@@ -32,10 +32,20 @@ swiftc \
   MacMonitor/ContentView.swift \
   MacMonitor/MacMonitorApp.swift
 
+echo "Compiling FanHelper..."
+swiftc \
+  -target ${ARCH}-apple-macosx13.0 \
+  -sdk "$SDK" \
+  -framework IOKit \
+  -O \
+  -o FanHelper_bin \
+  MacMonitor/FanHelper.swift
+
 echo "Creating app bundle..."
 mkdir -p MacMonitor.app/Contents/MacOS
 mkdir -p MacMonitor.app/Contents/Resources
 mv MacMonitor_bin MacMonitor.app/Contents/MacOS/MacMonitor
+mv FanHelper_bin MacMonitor.app/Contents/MacOS/FanHelper
 cp MacMonitor/Info.plist MacMonitor.app/Contents/
 
 echo "Launching..."

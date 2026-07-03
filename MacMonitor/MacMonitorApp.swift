@@ -21,6 +21,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var ramMenuItem: NSMenuItem!
     private var diskMenuItem: NSMenuItem!
     private var tempMenuItem: NSMenuItem!
+    private var fanMenuItem: NSMenuItem!
     private var menuUpdateTimer: Timer?
     private var launchAtLoginItem: NSMenuItem!
 
@@ -144,11 +145,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         ramMenuItem = makeStatsItem("memorychip", "Memory", "—")
         diskMenuItem = makeStatsItem("internaldrive", "Disk", "—")
         tempMenuItem = makeStatsItem("thermometer.medium", "Temp", "—")
+        fanMenuItem = makeStatsItem("fan.fill", "Fan", "—")
 
         menu.addItem(cpuMenuItem)
         menu.addItem(ramMenuItem)
         menu.addItem(diskMenuItem)
         menu.addItem(tempMenuItem)
+        menu.addItem(fanMenuItem)
 
         menu.addItem(NSMenuItem.separator())
 
@@ -202,6 +205,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         ramMenuItem.title = "Memory:  \(ram)"
         diskMenuItem.title = "Disk:  \(disk)"
         tempMenuItem.title = "Temp:  \(temp)"
+
+        let fanText: String
+        if monitor.fans.isEmpty {
+            fanText = "No fans"
+        } else if monitor.fans.count == 1 {
+            fanText = String(format: "%.0f RPM", monitor.fans[0].actualRPM)
+        } else {
+            fanText = monitor.fans.map { String(format: "%.0f", $0.actualRPM) }.joined(separator: " / ") + " RPM"
+        }
+        fanMenuItem.title = "Fan:  \(fanText)"
     }
 
     // MARK: - NSMenuDelegate

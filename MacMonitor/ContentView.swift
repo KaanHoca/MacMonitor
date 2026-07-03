@@ -1,7 +1,7 @@
 import SwiftUI
 
 enum DetailMode {
-    case none, cpu, ram, disk
+    case none, cpu, ram, disk, fan
 }
 
 struct ContentView: View {
@@ -64,6 +64,23 @@ struct ContentView: View {
                     onCleanComplete: { monitor.refreshDisk() }
                 )
                 .transition(.move(edge: .trailing).combined(with: .opacity))
+            case .fan:
+                FanDetailView(
+                    fans: monitor.fans,
+                    history: monitor.fanHistory,
+                    accent: tc.accent,
+                    tempColor: tc.temp,
+                    currentTemp: monitor.cpuTemp,
+                    boostActive: monitor.fanBoostActive,
+                    boostSeconds: monitor.fanBoostSecondsRemaining,
+                    cooldownSeconds: monitor.fanBoostCooldownRemaining,
+                    onBack: {
+                        monitor.activeDetail = "none"
+                        withAnimation(.easeInOut(duration: 0.25)) { detail = .none }
+                    },
+                    onBoost: { done in monitor.boostFans(completion: done) }
+                )
+                .transition(.move(edge: .trailing).combined(with: .opacity))
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -122,7 +139,6 @@ struct ContentView: View {
                         tappable: true
                     )
                     .onTapGesture {
-                        monitor.activeDetail = "disk"
                         withAnimation(.easeInOut(duration: 0.25)) { detail = .disk }
                     }
                     GaugeCell(
@@ -130,8 +146,12 @@ struct ContentView: View {
                         label: "Temp",
                         value: String(format: "%.0f°C", monitor.cpuTemp),
                         percent: min(monitor.cpuTemp / 100, 1.0),
-                        color: tc.temp
+                        color: tc.temp,
+                        tappable: true
                     )
+                    .onTapGesture {
+                        withAnimation(.easeInOut(duration: 0.25)) { detail = .fan }
+                    }
                 }
             }
 
@@ -576,6 +596,279 @@ struct CopyableIPCell: View {
                 withAnimation(.easeIn(duration: 0.2)) { copied = false }
             }
         }
+    }
+}
+
+// MARK: - Fan Detail View
+
+struct FanDetailView: View {
+    let fans: [FanInfo]
+    let history: [[Double]]
+    let accent: Color
+    let tempColor: Color
+    let currentTemp: Double
+    let boostActive: Bool
+    let boostSeconds: Int
+    let cooldownSeconds: Int
+    let onBack: () -> Void
+    let onBoost: (@escaping (Bool) -> Void) -> Void
+
+    @State private var boostState: BoostButtonState = .idle
+    @State private var spinAngle: Double = 0
+
+    enum BoostButtonState { case idle, running, done }
+
+    private var maxRPM: Double {
+        fans.map { $0.maxRPM }.max() ?? 1
+    }
+
+    private var avgRPM: Double {
+        guard !fans.isEmpty else { return 0 }
+        return fans.map { $0.actualRPM }.reduce(0, +) / Double(fans.count)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Header
+            HStack {
+                Button(action: onBack) {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.6))
+                        .frame(width: 32, height: 32)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+
+                Text("Fan Speed")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.9))
+
+                Spacer()
+
+                Text(String(format: "%.0f°C", currentTemp))
+                    .font(.system(size: 10, weight: .bold, design: .rounded))
+                    .foregroundStyle(tempColor)
+            }
+            .padding(.bottom, 10)
+
+            if fans.isEmpty {
+                Spacer()
+                VStack(spacing: 10) {
+                    Image(systemName: "fan.slash")
+                        .font(.system(size: 24))
+                        .foregroundStyle(.white.opacity(0.2))
+                    Text("No fans detected")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.white.opacity(0.3))
+                }
+                .frame(maxWidth: .infinity)
+                Spacer()
+            } else {
+                ScrollView(.vertical, showsIndicators: false) {
+                    VStack(spacing: 10) {
+                        // Fan cards
+                        ForEach(fans) { fan in
+                            fanCard(fan)
+                        }
+
+                        // RPM Graph
+                        if !history.isEmpty && history.first?.count ?? 0 > 1 {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("RPM HISTORY")
+                                    .font(.system(size: 9, weight: .bold))
+                                    .foregroundStyle(.white.opacity(0.25))
+                                    .padding(.leading, 2)
+
+                                RPMGraph(history: history, maxRPM: maxRPM, color: accent)
+                                    .frame(height: 60)
+                            }
+                        }
+                    }
+                }
+
+                // Action bar
+                actionBar
+            }
+        }
+        .padding(16)
+        .onChange(of: boostActive) { active in
+            if !active && boostState == .running {
+                withAnimation { boostState = .done }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                    withAnimation { boostState = .idle }
+                }
+            }
+        }
+    }
+
+    private func fanCard(_ fan: FanInfo) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Image(systemName: "fan.fill")
+                    .font(.system(size: 10))
+                    .foregroundStyle(accent.opacity(0.7))
+                Text("Fan \(fan.id + 1)")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.7))
+
+                Spacer()
+
+                Text(String(format: "%.0f RPM", fan.actualRPM))
+                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.9))
+            }
+
+            // RPM bar
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(Color.white.opacity(0.06))
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(accent.opacity(0.6))
+                        .frame(width: max(4, geo.size.width * CGFloat(fan.maxRPM > 0 ? fan.actualRPM / fan.maxRPM : 0)))
+                        .animation(.easeInOut(duration: 0.4), value: fan.actualRPM)
+                }
+            }
+            .frame(height: 3)
+
+            // Min / Max labels
+            HStack {
+                Text(String(format: "Min: %.0f", fan.minRPM))
+                    .font(.system(size: 9, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.3))
+                Spacer()
+                Text(String(format: "Max: %.0f", fan.maxRPM))
+                    .font(.system(size: 9, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.3))
+            }
+        }
+        .padding(10)
+        .background(Color.white.opacity(0.03))
+        .cornerRadius(8)
+    }
+
+    private var actionBar: some View {
+        HStack {
+            // Cooldown or boost timer text
+            if boostActive {
+                Text("\(boostSeconds)s")
+                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .foregroundStyle(accent.opacity(0.7))
+            } else if cooldownSeconds > 0 {
+                let min = cooldownSeconds / 60
+                let sec = cooldownSeconds % 60
+                Text(String(format: "%d:%02d", min, sec))
+                    .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.3))
+            }
+
+            Spacer()
+
+            Button {
+                guard boostState == .idle, !boostActive, cooldownSeconds <= 0 else { return }
+                withAnimation { boostState = .running }
+                withAnimation(.linear(duration: 1).repeatForever(autoreverses: false)) {
+                    spinAngle = 360
+                }
+                onBoost { success in
+                    if !success {
+                        withAnimation {
+                            spinAngle = 0
+                            boostState = .idle
+                        }
+                    }
+                }
+            } label: {
+                HStack(spacing: 5) {
+                    Group {
+                        switch boostState {
+                        case .idle:
+                            Image(systemName: "wind")
+                                .foregroundStyle(.white)
+                        case .running:
+                            Image(systemName: "fan.fill")
+                                .foregroundStyle(.white)
+                                .rotationEffect(.degrees(spinAngle))
+                        case .done:
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundStyle(.green)
+                        }
+                    }
+                    .font(.system(size: 10, weight: .semibold))
+
+                    Text(boostLabel)
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.white)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 6)
+                .background(boostBackground)
+                .cornerRadius(8)
+            }
+            .buttonStyle(.plain)
+            .disabled(boostState == .running || boostActive || cooldownSeconds > 0)
+        }
+        .padding(.top, 10)
+    }
+
+    private var boostLabel: String {
+        if boostState == .done { return "Done" }
+        if boostActive { return "Boosting" }
+        if cooldownSeconds > 0 { return "Cooldown" }
+        return "Boost"
+    }
+
+    private var boostBackground: Color {
+        if boostState == .done { return Color.green.opacity(0.3) }
+        if cooldownSeconds > 0 { return Color.white.opacity(0.08) }
+        return accent.opacity(0.3)
+    }
+}
+
+// MARK: - RPM Graph
+
+struct RPMGraph: View {
+    let history: [[Double]]
+    let maxRPM: Double
+    let color: Color
+
+    var body: some View {
+        GeometryReader { geo in
+            ZStack {
+                // Grid lines
+                ForEach(0..<3, id: \.self) { i in
+                    let y = geo.size.height * CGFloat(i) / 2.0
+                    Path { path in
+                        path.move(to: CGPoint(x: 0, y: y))
+                        path.addLine(to: CGPoint(x: geo.size.width, y: y))
+                    }
+                    .stroke(Color.white.opacity(0.04), lineWidth: 0.5)
+                }
+
+                // Fan lines
+                ForEach(0..<history.count, id: \.self) { fanIdx in
+                    let data = history[fanIdx]
+                    if data.count > 1 {
+                        Path { path in
+                            let stepX = geo.size.width / CGFloat(max(data.count - 1, 1))
+                            for (i, rpm) in data.enumerated() {
+                                let x = stepX * CGFloat(i)
+                                let y = geo.size.height - (maxRPM > 0 ? geo.size.height * CGFloat(rpm / maxRPM) : 0)
+                                if i == 0 { path.move(to: CGPoint(x: x, y: y)) }
+                                else { path.addLine(to: CGPoint(x: x, y: y)) }
+                            }
+                        }
+                        .stroke(
+                            color.opacity(history.count > 1 ? (fanIdx == 0 ? 0.8 : 0.4) : 0.8),
+                            style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round)
+                        )
+                    }
+                }
+            }
+        }
+        .background(Color.white.opacity(0.02))
+        .cornerRadius(6)
     }
 }
 

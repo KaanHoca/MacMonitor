@@ -74,6 +74,13 @@ struct ProcessEntry: Identifiable {
     let value: Double  // MB (ram) or % (cpu)
 }
 
+struct FanInfo: Identifiable, Equatable {
+    let id: Int          // fan index (0, 1, ...)
+    var actualRPM: Double
+    var minRPM: Double
+    var maxRPM: Double
+}
+
 class SystemMonitor: ObservableObject {
     @Published var cpuUsage: Double = 0
     @Published var usedRAM: Double = 0
@@ -89,6 +96,15 @@ class SystemMonitor: ObservableObject {
     @Published var ping: Double = 0           // ms
     @Published var localIP: String = "—"
     @Published var externalIP: String = "—"
+
+    // Fan monitoring
+    @Published var fans: [FanInfo] = []
+    @Published var fanHistory: [[Double]] = []   // RPM history per fan, last 60 readings
+
+    // Fan boost state
+    @Published var fanBoostActive: Bool = false
+    @Published var fanBoostSecondsRemaining: Int = 0
+    @Published var fanBoostCooldownRemaining: Int = 0
 
     // Disk cleaner instance — shared with ContentView
     let diskCleaner = DiskCleaner()
@@ -110,8 +126,13 @@ class SystemMonitor: ObservableObject {
     private var prevBytesOut: UInt64 = 0
     private var lastNetworkTime: Date?
 
-    // Cached SMC key info — dataSize per key, queried once
-    private var smcKeyInfoCache: [UInt32: UInt32] = [:]
+    // Cached SMC key info — dataSize and dataType per key, queried once
+    private var smcKeyInfoCache: [UInt32: (dataSize: UInt32, dataType: UInt32)] = [:]
+    private var fanCount: Int = -1  // -1 = not yet queried
+    private var boostTimer: Timer?
+    private var cooldownTimer: Timer?
+    private let cooldownKey = "fanBoostCooldownEnd"
+    private static let boostDuration = 30  // seconds, matches the helper invocation
 
     init() {
         // Restore saved theme
@@ -126,6 +147,7 @@ class SystemMonitor: ObservableObject {
         updateNetworkSpeed() // seed initial bytes
         updatePing()
         updateIPs()
+        restoreCooldownState()
         timer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
             guard let self = self else { return }
             self.tickCount += 1
@@ -143,6 +165,8 @@ class SystemMonitor: ObservableObject {
 
     deinit {
         timer?.invalidate()
+        boostTimer?.invalidate()
+        cooldownTimer?.invalidate()
         if smcConn != 0 { IOServiceClose(smcConn) }
     }
 
@@ -158,6 +182,7 @@ class SystemMonitor: ObservableObject {
             let ram  = self.getRAM()
             let disk = diskToo ? self.getDisk() : nil
             let temp = self.getTemp()
+            let fanData = self.getFans()
 
             DispatchQueue.main.async {
                 // Only update published properties when values actually changed
@@ -177,6 +202,22 @@ class SystemMonitor: ObservableObject {
 
                 let roundedTemp = temp.rounded()
                 if self.cpuTemp != roundedTemp { self.cpuTemp = roundedTemp }
+
+                // Update fan data only when it actually changed
+                if self.fans != fanData { self.fans = fanData }
+
+                // Append to history (keep last 60 readings), skip on fanless Macs
+                if !fanData.isEmpty {
+                    if self.fanHistory.count != fanData.count {
+                        self.fanHistory = fanData.map { _ in [] }
+                    }
+                    for (i, fan) in fanData.enumerated() {
+                        self.fanHistory[i].append(fan.actualRPM)
+                        if self.fanHistory[i].count > 60 {
+                            self.fanHistory[i].removeFirst()
+                        }
+                    }
+                }
             }
         }
     }
@@ -580,14 +621,17 @@ class SystemMonitor: ObservableObject {
         IOObjectRelease(svc)
     }
 
-    private func readSMCFloat(_ key: String) -> Double? {
+    // General-purpose SMC read supporting multiple data types
+    private func readSMCValue(_ key: String) -> Double? {
         guard smcConn != 0 else { return nil }
         let keyCode = fourCC(key)
 
-        // Get key info (cached — dataSize never changes for a given key)
+        // Get key info (cached — never changes for a given key)
         let dataSize: UInt32
+        let dataType: UInt32
         if let cached = smcKeyInfoCache[keyCode] {
-            dataSize = cached
+            dataSize = cached.dataSize
+            dataType = cached.dataType
         } else {
             var inData = SMCKeyData()
             var outData = SMCKeyData()
@@ -595,9 +639,10 @@ class SystemMonitor: ObservableObject {
             inData.data8 = 9 // kSMCGetKeyInfo
             var outSize = MemoryLayout<SMCKeyData>.size
             let kr = IOConnectCallStructMethod(smcConn, 2, &inData, MemoryLayout<SMCKeyData>.size, &outData, &outSize)
-            guard kr == kIOReturnSuccess, outData.keyInfo.dataSize == 4 else { return nil }
+            guard kr == kIOReturnSuccess, outData.keyInfo.dataSize > 0 else { return nil }
             dataSize = outData.keyInfo.dataSize
-            smcKeyInfoCache[keyCode] = dataSize
+            dataType = outData.keyInfo.dataType
+            smcKeyInfoCache[keyCode] = (dataSize, dataType)
         }
 
         // Read value
@@ -610,10 +655,40 @@ class SystemMonitor: ObservableObject {
         let kr = IOConnectCallStructMethod(smcConn, 2, &inRead, MemoryLayout<SMCKeyData>.size, &outRead, &outSize)
         guard kr == kIOReturnSuccess else { return nil }
 
-        let temp = withUnsafePointer(to: outRead.bytes) { ptr in
-            ptr.withMemoryRebound(to: Float32.self, capacity: 1) { $0.pointee }
+        // Decode based on data type
+        let fltType  = fourCC("flt ")
+        let fpe2Type = fourCC("fpe2")
+        let ui8Type  = fourCC("ui8 ")
+        let ui16Type = fourCC("ui16")
+
+        if dataType == fltType && dataSize == 4 {
+            // IEEE 754 float (Apple Silicon)
+            let val = withUnsafePointer(to: outRead.bytes) { ptr in
+                ptr.withMemoryRebound(to: Float32.self, capacity: 1) { $0.pointee }
+            }
+            return Double(val)
+        } else if dataType == fpe2Type && dataSize >= 2 {
+            // Fixed-point 14.2 (Intel) — big-endian
+            let raw = (UInt16(outRead.bytes.0) << 8) | UInt16(outRead.bytes.1)
+            return Double(raw) / 4.0
+        } else if dataType == ui8Type {
+            return Double(outRead.bytes.0)
+        } else if dataType == ui16Type && dataSize >= 2 {
+            let raw = (UInt16(outRead.bytes.0) << 8) | UInt16(outRead.bytes.1)
+            return Double(raw)
+        } else if dataSize == 4 {
+            // Fallback: try float
+            let val = withUnsafePointer(to: outRead.bytes) { ptr in
+                ptr.withMemoryRebound(to: Float32.self, capacity: 1) { $0.pointee }
+            }
+            return Double(val)
         }
-        let val = Double(temp)
+        return nil
+    }
+
+    // Temperature-specific SMC read with range validation
+    private func readSMCFloat(_ key: String) -> Double? {
+        guard let val = readSMCValue(key) else { return nil }
         return (val > 0 && val < 130) ? val : nil
     }
 
@@ -638,5 +713,127 @@ class SystemMonitor: ObservableObject {
             smoothedTemp = smoothedTemp * 0.6 + avg * 0.4
         }
         return smoothedTemp
+    }
+
+    // MARK: - Fan Reading
+    private func getFans() -> [FanInfo] {
+        // Query fan count once (FNum key)
+        if fanCount < 0 {
+            if let count = readSMCValue("FNum") {
+                fanCount = Int(count)
+            } else {
+                fanCount = 0
+            }
+        }
+        guard fanCount > 0 else { return [] }
+
+        var result: [FanInfo] = []
+        for i in 0..<fanCount {
+            let actual = readSMCValue("F\(i)Ac") ?? 0
+            let minRPM = readSMCValue("F\(i)Mn") ?? 0
+            let maxRPM = readSMCValue("F\(i)Mx") ?? 0
+            result.append(FanInfo(id: i, actualRPM: actual, minRPM: minRPM, maxRPM: maxRPM))
+        }
+        return result
+    }
+
+    // MARK: - Fan Boost
+    func boostFans(completion: @escaping (Bool) -> Void) {
+        guard !fanBoostActive, fanBoostCooldownRemaining <= 0 else {
+            completion(false)
+            return
+        }
+        guard let maxRPM = fans.map({ $0.maxRPM }).max(), maxRPM > 0 else {
+            completion(false)
+            return
+        }
+        // Find the pre-compiled FanHelper binary in the app bundle
+        guard let helperURL = Bundle.main.url(forAuxiliaryExecutable: "FanHelper") else {
+            completion(false)
+            return
+        }
+        let targetRPM = Int(maxRPM * 0.9)
+
+        // Quote the helper path for the shell, then escape for the AppleScript literal.
+        // The trailing "&" detaches the helper so osascript returns right after auth,
+        // which lets us tell a cancelled password prompt apart from a running boost.
+        let quotedPath = "'" + helperURL.path.replacingOccurrences(of: "'", with: "'\\''") + "'"
+        let shellCmd = "\(quotedPath) boost \(targetRPM) \(Self.boostDuration) > /dev/null 2>&1 &"
+        let scriptSrc = shellCmd
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        task.arguments = ["-e", "do shell script \"\(scriptSrc)\" with administrator privileges"]
+        task.terminationHandler = { [weak self] process in
+            let authorized = process.terminationStatus == 0
+            DispatchQueue.main.async {
+                guard let self = self else {
+                    completion(false)
+                    return
+                }
+                if authorized {
+                    self.startBoostCountdown()
+                }
+                completion(authorized)
+            }
+        }
+        do {
+            try task.run()
+        } catch {
+            task.terminationHandler = nil
+            DispatchQueue.main.async { completion(false) }
+        }
+    }
+
+    private func startBoostCountdown() {
+        fanBoostActive = true
+        fanBoostSecondsRemaining = Self.boostDuration
+        boostTimer?.invalidate()
+        let timer = Timer(timeInterval: 1, repeats: true) { [weak self] timer in
+            guard let self = self else { timer.invalidate(); return }
+            self.fanBoostSecondsRemaining -= 1
+            if self.fanBoostSecondsRemaining <= 0 {
+                timer.invalidate()
+                self.fanBoostActive = false
+                self.startCooldown()
+            }
+        }
+        // Common mode keeps the countdown running while menus are open
+        RunLoop.main.add(timer, forMode: .common)
+        boostTimer = timer
+    }
+
+    private func startCooldown() {
+        let cooldownDuration: TimeInterval = 15 * 60
+        let cooldownEnd = Date().addingTimeInterval(cooldownDuration)
+        UserDefaults.standard.set(cooldownEnd.timeIntervalSince1970, forKey: cooldownKey)
+        fanBoostCooldownRemaining = Int(cooldownDuration)
+        startCooldownTimer()
+    }
+
+    private func restoreCooldownState() {
+        let savedEnd = UserDefaults.standard.double(forKey: cooldownKey)
+        guard savedEnd > 0 else { return }
+        let remaining = savedEnd - Date().timeIntervalSince1970
+        if remaining > 0 {
+            fanBoostCooldownRemaining = Int(remaining)
+            startCooldownTimer()
+        }
+    }
+
+    private func startCooldownTimer() {
+        cooldownTimer?.invalidate()
+        let timer = Timer(timeInterval: 1, repeats: true) { [weak self] timer in
+            guard let self = self else { timer.invalidate(); return }
+            self.fanBoostCooldownRemaining -= 1
+            if self.fanBoostCooldownRemaining <= 0 {
+                timer.invalidate()
+                self.fanBoostCooldownRemaining = 0
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        cooldownTimer = timer
     }
 }
