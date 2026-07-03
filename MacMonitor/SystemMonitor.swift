@@ -118,7 +118,8 @@ class SystemMonitor: ObservableObject {
     }
 
     private var timer: Timer?
-    private var prevCPU: (user: UInt32, sys: UInt32, idle: UInt32, nice: UInt32) = (0,0,0,0)
+    private var prevCPU: (user: UInt64, sys: UInt64, idle: UInt64, nice: UInt64) = (0,0,0,0)
+    private var lastCPUUsage: Double = 0
     private var smcConn: io_connect_t = 0
     private var smoothedTemp: Double = 0
     private var tickCount: Int = 0
@@ -148,7 +149,7 @@ class SystemMonitor: ObservableObject {
         updatePing()
         updateIPs()
         restoreCooldownState()
-        timer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
+        let tick = Timer(timeInterval: 5.0, repeats: true) { [weak self] _ in
             guard let self = self else { return }
             self.tickCount += 1
             // Disk changes rarely — check every ~30s (every 6th tick)
@@ -160,6 +161,21 @@ class SystemMonitor: ObservableObject {
             // Auto-refresh process list while detail view is open
             if self.activeDetail == "cpu" { self.fetchTopCPUProcesses() }
             else if self.activeDetail == "ram" { self.fetchTopRAMProcesses() }
+        }
+        // Common mode keeps ticks firing while menus are open or the window is dragged
+        RunLoop.main.add(tick, forMode: .common)
+        timer = tick
+    }
+
+    /// Delivers UI mutations on the main run loop in common modes. A plain
+    /// main-queue dispatch stalls during NSMenu event tracking, which froze
+    /// the menu bar stats while the menu was open.
+    private func publishOnMain(_ block: @escaping () -> Void) {
+        if Thread.isMainThread {
+            block()
+        } else {
+            RunLoop.main.perform(inModes: [.common], block: block)
+            CFRunLoopWakeUp(CFRunLoopGetMain())
         }
     }
 
@@ -184,7 +200,7 @@ class SystemMonitor: ObservableObject {
             let temp = self.getTemp()
             let fanData = self.getFans()
 
-            DispatchQueue.main.async {
+            self.publishOnMain {
                 // Only update published properties when values actually changed
                 let roundedCPU = (cpu * 10).rounded() / 10
                 if self.cpuUsage != roundedCPU { self.cpuUsage = roundedCPU }
@@ -230,17 +246,19 @@ class SystemMonitor: ObservableObject {
 
         let result = host_processor_info(mach_host_self(), PROCESSOR_CPU_LOAD_INFO,
                                          &numCPUs, &cpuInfo, &numCPUInfo)
-        guard result == KERN_SUCCESS, let info = cpuInfo else { return 0 }
+        guard result == KERN_SUCCESS, let info = cpuInfo else { return lastCPUUsage }
 
-        var totalUser: UInt32 = 0, totalSys: UInt32 = 0
-        var totalIdle: UInt32 = 0, totalNice: UInt32 = 0
+        // Sum into 64-bit: the per-core kernel tick counters are 32-bit and
+        // wrap on long uptimes; summing into UInt32 would overflow and trap.
+        var totalUser: UInt64 = 0, totalSys: UInt64 = 0
+        var totalIdle: UInt64 = 0, totalNice: UInt64 = 0
 
         for i in 0..<Int(numCPUs) {
             let base = Int(CPU_STATE_MAX) * i
-            totalUser += UInt32(info[base + Int(CPU_STATE_USER)])
-            totalSys  += UInt32(info[base + Int(CPU_STATE_SYSTEM)])
-            totalIdle += UInt32(info[base + Int(CPU_STATE_IDLE)])
-            totalNice += UInt32(info[base + Int(CPU_STATE_NICE)])
+            totalUser += UInt64(UInt32(bitPattern: info[base + Int(CPU_STATE_USER)]))
+            totalSys  += UInt64(UInt32(bitPattern: info[base + Int(CPU_STATE_SYSTEM)]))
+            totalIdle += UInt64(UInt32(bitPattern: info[base + Int(CPU_STATE_IDLE)]))
+            totalNice += UInt64(UInt32(bitPattern: info[base + Int(CPU_STATE_NICE)]))
         }
 
         vm_deallocate(mach_task_self_,
@@ -248,15 +266,21 @@ class SystemMonitor: ObservableObject {
                       vm_size_t(numCPUInfo) * vm_size_t(MemoryLayout<integer_t>.size))
 
         let prev = prevCPU
+        prevCPU = (totalUser, totalSys, totalIdle, totalNice)
+
+        // A wrapped per-core counter can make a sum go backwards; skip that sample
+        guard totalUser >= prev.user, totalSys >= prev.sys,
+              totalIdle >= prev.idle, totalNice >= prev.nice else { return lastCPUUsage }
+
         let diffUser = totalUser - prev.user
         let diffSys  = totalSys  - prev.sys
         let diffIdle = totalIdle - prev.idle
         let diffNice = totalNice - prev.nice
         let total    = diffUser + diffSys + diffIdle + diffNice
 
-        prevCPU = (totalUser, totalSys, totalIdle, totalNice)
-        guard total > 0 else { return 0 }
-        return Double(diffUser + diffSys + diffNice) / Double(total) * 100.0
+        guard total > 0 else { return lastCPUUsage }
+        lastCPUUsage = Double(diffUser + diffSys + diffNice) / Double(total) * 100.0
+        return lastCPUUsage
     }
 
     // MARK: - RAM
@@ -292,8 +316,11 @@ class SystemMonitor: ObservableObject {
     }
 
     // MARK: - Quick Purge (Memory Pressure)
-    func quickPurgeRAM(completion: @escaping (Bool) -> Void) {
+    func quickPurgeRAM(completion: @escaping (Bool, String?) -> Void) {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self = self else { return }
+            let usedBefore = self.getRAM().used
+
             // Read VM stats to determine reclaimable memory
             var stats = vm_statistics64()
             var count = mach_msg_type_number_t(
@@ -335,37 +362,49 @@ class SystemMonitor: ObservableObject {
             // Brief pause for the OS to reclaim pages
             Thread.sleep(forTimeInterval: 0.5)
 
-            self?.update(diskToo: false)
+            // Measure the actual effect instead of assuming success
+            let freedGB = max(0, usedBefore - self.getRAM().used)
+            let detail = freedGB >= 0.1 ? String(format: "%.1f GB", freedGB) : nil
+
+            self.update(diskToo: false)
             DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
-                self?.fetchTopRAMProcesses()
-                self?.purgeJustCompleted = true
+                self.fetchTopRAMProcesses()
+                self.purgeJustCompleted = true
             }
-            DispatchQueue.main.async { completion(true) }
+            self.publishOnMain { completion(true, detail) }
         }
     }
 
     // MARK: - Deep Purge (Admin)
-    func purgeRAM(completion: @escaping (Bool) -> Void) {
+    func purgeRAM(completion: @escaping (Bool, String?) -> Void) {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self = self else { return }
+            let usedBefore = self.getRAM().used
+
             // Opens macOS admin password prompt via osascript
             let task = Process()
             task.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
             task.arguments = ["-e", "do shell script \"/usr/sbin/purge\" with administrator privileges"]
             do { try task.run() } catch {
-                DispatchQueue.main.async { completion(false) }
+                self.publishOnMain { completion(false, nil) }
                 return
             }
             task.waitUntilExit()
             let success = task.terminationStatus == 0
-            // Refresh data after purge
+
+            // Refresh data after purge and measure the actual effect
+            var detail: String? = nil
             if success {
-                self?.update(diskToo: false)
+                Thread.sleep(forTimeInterval: 0.5)
+                let freedGB = max(0, usedBefore - self.getRAM().used)
+                if freedGB >= 0.1 { detail = String(format: "%.1f GB", freedGB) }
+                self.update(diskToo: false)
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
-                    self?.fetchTopRAMProcesses()
-                    self?.purgeJustCompleted = true
+                    self.fetchTopRAMProcesses()
+                    self.purgeJustCompleted = true
                 }
             }
-            DispatchQueue.main.async { completion(success) }
+            self.publishOnMain { completion(success, detail) }
         }
     }
 
@@ -407,7 +446,7 @@ class SystemMonitor: ObservableObject {
                 .map { ProcessEntry(name: $0.key, value: $0.value) }
                 .sorted { $0.value > $1.value }
                 .prefix(8)
-            DispatchQueue.main.async { self.topRAMProcesses = Array(result) }
+            self.publishOnMain { self.topRAMProcesses = Array(result) }
         }
     }
 
@@ -426,7 +465,7 @@ class SystemMonitor: ObservableObject {
                 .map { ProcessEntry(name: $0.key, value: $0.value) }
                 .sorted { $0.value > $1.value }
                 .prefix(8)
-            DispatchQueue.main.async { self.topCPUProcesses = Array(result) }
+            self.publishOnMain { self.topCPUProcesses = Array(result) }
         }
     }
 
@@ -483,7 +522,7 @@ class SystemMonitor: ObservableObject {
             guard elapsed > 0 else { return }
             let dlSpeed = Double(bytes.bytesIn.subtractingReportingOverflow(prevBytesIn).overflow ? 0 : bytes.bytesIn - prevBytesIn) / elapsed
             let ulSpeed = Double(bytes.bytesOut.subtractingReportingOverflow(prevBytesOut).overflow ? 0 : bytes.bytesOut - prevBytesOut) / elapsed
-            DispatchQueue.main.async {
+            publishOnMain {
                 let roundedDL = (dlSpeed / 1024 * 10).rounded() / 10
                 let roundedUL = (ulSpeed / 1024 * 10).rounded() / 10
                 if self.downloadSpeed != roundedDL { self.downloadSpeed = roundedDL }
@@ -508,7 +547,7 @@ class SystemMonitor: ObservableObject {
             task.waitUntilExit()
             guard task.terminationStatus == 0,
                   let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) else {
-                DispatchQueue.main.async { self?.ping = -1 }
+                self?.publishOnMain { self?.ping = -1 }
                 return
             }
             // Parse "time=12.345 ms"
@@ -516,7 +555,7 @@ class SystemMonitor: ObservableObject {
                let msRange = output.range(of: " ms", range: range.upperBound..<output.endIndex) {
                 let timeStr = String(output[range.upperBound..<msRange.lowerBound])
                 if let ms = Double(timeStr) {
-                    DispatchQueue.main.async {
+                    self?.publishOnMain {
                         let rounded = (ms * 10).rounded() / 10
                         if self?.ping != rounded { self?.ping = rounded }
                     }
@@ -530,12 +569,12 @@ class SystemMonitor: ObservableObject {
     private func updateIPs() {
         // Local IP — synchronous, lightweight
         let local = getLocalIP()
-        DispatchQueue.main.async {
+        publishOnMain {
             if self.localIP != local { self.localIP = local }
         }
         // External IP — async network request
         getExternalIP { [weak self] ip in
-            DispatchQueue.main.async {
+            self?.publishOnMain {
                 guard let self = self else { return }
                 if self.externalIP != ip { self.externalIP = ip }
             }
@@ -692,9 +731,28 @@ class SystemMonitor: ObservableObject {
         return (val > 0 && val < 130) ? val : nil
     }
 
+    // Candidate CPU temperature keys across chip generations. Valid keys are
+    // discovered once at runtime and cached; a fixed list broke on Intel and
+    // on Apple Silicon generations newer than M1.
+    private static let tempKeyCandidates: [String] = [
+        // Apple Silicon M1
+        "Tp09", "Tp0T", "Tp01", "Tp05", "Tp0D", "Tp0H", "Tp0L", "Tp0P", "Tp0X", "Tp0b",
+        // M2
+        "Tp1h", "Tp1t", "Tp1p", "Tp1l", "Tp0f", "Tp0j", "Tp0n", "Tp0r",
+        // M3 / M4 efficiency and performance clusters
+        "Te05", "Te0L", "Te0P", "Te0S", "Tf04", "Tf09", "Tf0A", "Tf0B", "Tf0D", "Tf0E",
+        "Tp0V", "Tp0Y", "Tp0e", "Tp02", "Tp0A",
+        // Intel
+        "TC0P", "TC0D", "TC0E", "TC0F", "TC0H", "TC1C", "TC2C", "TC3C", "TC4C"
+    ]
+    private var validTempKeys: [String]?
+
     private func getTemp() -> Double {
-        // Average across all cores
-        let keys = ["Tp09", "Tp01", "Tp02", "Tp05", "Tp0A"]
+        if validTempKeys == nil {
+            validTempKeys = Self.tempKeyCandidates.filter { readSMCFloat($0) != nil }
+        }
+        guard let keys = validTempKeys, !keys.isEmpty else { return 0 }
+
         var sum: Double = 0
         var count: Double = 0
         for key in keys {

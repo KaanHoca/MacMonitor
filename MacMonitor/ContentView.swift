@@ -40,7 +40,7 @@ struct ContentView: View {
             case .cpu:
                 ProcessListView(
                     title: "CPU Usage",
-                    subtitle: String(format: "%%%.0f", monitor.cpuUsage),
+                    subtitle: String(format: "%.0f%%", monitor.cpuUsage),
                     processes: monitor.topCPUProcesses,
                     formatValue: { String(format: "%.1f%%", $0) },
                     barColor: { self.processBarColor($0, thresholds: (15, 50)) },
@@ -144,8 +144,8 @@ struct ContentView: View {
                     GaugeCell(
                         icon: "thermometer.medium",
                         label: "Temp",
-                        value: String(format: "%.0f°C", monitor.cpuTemp),
-                        percent: min(monitor.cpuTemp / 100, 1.0),
+                        value: monitor.cpuTemp > 0 ? String(format: "%.0f°C", monitor.cpuTemp) : "--",
+                        percent: monitor.cpuTemp > 0 ? min(monitor.cpuTemp / 100, 1.0) : 0,
                         color: tc.temp,
                         tappable: true
                     )
@@ -254,13 +254,15 @@ struct ProcessListView: View {
     var onBack: () -> Void
     var actionIcon: String? = nil
     var actionLabel: String? = nil
-    var onAction: ((@escaping (Bool) -> Void) -> Void)? = nil
+    var onAction: ((@escaping (Bool, String?) -> Void) -> Void)? = nil
     var secondaryIcon: String? = nil
     var secondaryLabel: String? = nil
-    var onSecondaryAction: ((@escaping (Bool) -> Void) -> Void)? = nil
+    var onSecondaryAction: ((@escaping (Bool, String?) -> Void) -> Void)? = nil
     @State private var actionState: ActionState = .idle
+    @State private var actionDetail: String? = nil
     @State private var spinAngle: Double = 0
     @State private var secondaryState: ActionState = .idle
+    @State private var secondaryDetail: String? = nil
     @State private var secondarySpinAngle: Double = 0
 
     enum ActionState { case idle, running, done }
@@ -380,7 +382,7 @@ struct ProcessListView: View {
 
     private func actionButton(
         icon: String, label: String?,
-        state: ActionState, spin: Double,
+        state: ActionState, detail: String?, spin: Double,
         onTap: @escaping () -> Void
     ) -> some View {
         Button(action: onTap) {
@@ -402,7 +404,8 @@ struct ProcessListView: View {
                 .font(.system(size: 10, weight: .semibold))
 
                 if let label = label {
-                    Text(state == .done ? "Done" : label)
+                    // When finished, show the measured result (e.g. "1.2 GB") if available
+                    Text(state == .done ? (detail ?? "Done") : label)
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(.white)
                 }
@@ -421,15 +424,16 @@ struct ProcessListView: View {
             Spacer()
 
             if let icon = actionIcon {
-                actionButton(icon: icon, label: actionLabel, state: actionState, spin: spinAngle) {
+                actionButton(icon: icon, label: actionLabel, state: actionState, detail: actionDetail, spin: spinAngle) {
                     guard actionState == .idle else { return }
                     withAnimation { actionState = .running }
                     withAnimation(.linear(duration: 1).repeatForever(autoreverses: false)) {
                         spinAngle = 360
                     }
-                    onAction? { success in
+                    onAction? { success, detail in
                         withAnimation {
                             spinAngle = 0
+                            actionDetail = detail
                             actionState = success ? .done : .idle
                         }
                         if success {
@@ -442,15 +446,16 @@ struct ProcessListView: View {
             }
 
             if let icon = secondaryIcon {
-                actionButton(icon: icon, label: secondaryLabel, state: secondaryState, spin: secondarySpinAngle) {
+                actionButton(icon: icon, label: secondaryLabel, state: secondaryState, detail: secondaryDetail, spin: secondarySpinAngle) {
                     guard secondaryState == .idle else { return }
                     withAnimation { secondaryState = .running }
                     withAnimation(.linear(duration: 1).repeatForever(autoreverses: false)) {
                         secondarySpinAngle = 360
                     }
-                    onSecondaryAction? { success in
+                    onSecondaryAction? { success, detail in
                         withAnimation {
                             secondarySpinAngle = 0
+                            secondaryDetail = detail
                             secondaryState = success ? .done : .idle
                         }
                         if success {
@@ -1160,21 +1165,27 @@ struct CategoryRow: View {
     @ObservedObject var cleaner: DiskCleaner
     let accent: Color
 
-    @State private var isOn: Bool = false
     @State private var showInfo: Bool = false
     private var size: Int64 { cleaner.sizes[category.id] ?? 0 }
     private var isDefault: Bool { cleaner.isDefaultValue(category.id) }
+    private var isOn: Bool { cleaner.isEnabled(category.id) }
+
+    // Bound straight to the cleaner so Reset buttons update rows immediately;
+    // local @State would survive redraws and keep showing stale values.
+    private var toggleBinding: Binding<Bool> {
+        Binding(
+            get: { cleaner.isEnabled(category.id) },
+            set: { cleaner.setEnabled(category.id, $0) }
+        )
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 6) {
                 // Toggle
-                Toggle("", isOn: $isOn)
+                Toggle("", isOn: toggleBinding)
                     .toggleStyle(CleanupToggleStyle(accent: accent))
                     .labelsHidden()
-                    .onChange(of: isOn) { newVal in
-                        cleaner.setEnabled(category.id, newVal)
-                    }
 
                 // Icon
                 Image(systemName: category.icon)
@@ -1226,9 +1237,6 @@ struct CategoryRow: View {
         }
         .padding(.vertical, 3)
         .padding(.horizontal, 4)
-        .onAppear {
-            isOn = cleaner.isEnabled(category.id)
-        }
     }
 }
 

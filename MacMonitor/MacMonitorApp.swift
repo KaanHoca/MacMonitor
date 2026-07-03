@@ -199,7 +199,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let cpu = String(format: "%.0f%%", monitor.cpuUsage)
         let ram = String(format: "%.1f / %.0f GB", monitor.usedRAM, monitor.totalRAM)
         let disk = monitor.diskLabel
-        let temp = String(format: "%.0f°C", monitor.cpuTemp)
+        let temp = monitor.cpuTemp > 0 ? String(format: "%.0f°C", monitor.cpuTemp) : "--"
 
         cpuMenuItem.title = "CPU:  \(cpu)"
         ramMenuItem.title = "Memory:  \(ram)"
@@ -221,9 +221,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func menuWillOpen(_ menu: NSMenu) {
         updateMenuStats()
-        menuUpdateTimer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: true) { [weak self] _ in
+        // Menu tracking runs the main loop in event-tracking mode; the timer
+        // must live in common modes or it never fires while the menu is open.
+        let timer = Timer(timeInterval: 3.0, repeats: true) { [weak self] _ in
             self?.updateMenuStats()
         }
+        RunLoop.main.add(timer, forMode: .common)
+        menuUpdateTimer = timer
     }
 
     func menuDidClose(_ menu: NSMenu) {

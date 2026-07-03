@@ -52,6 +52,7 @@ class DiskCleaner: ObservableObject {
 
     func setEnabled(_ categoryId: String, _ enabled: Bool) {
         UserDefaults.standard.set(enabled, forKey: "diskClean_\(categoryId)")
+        objectWillChange.send()
     }
 
     func isDefaultValue(_ categoryId: String) -> Bool {
