@@ -146,7 +146,8 @@ class SystemMonitor: ObservableObject {
     private var boostTimer: Timer?
     private var cooldownTimer: Timer?
     private let cooldownKey = "fanBoostCooldownEnd"
-    private static let boostDuration = 30  // seconds, matches the helper invocation
+    private static let boostDuration = 30  // seconds, full ramp-hold-ramp cycle
+    private static let boostPercent = 70   // percent into each fan's min-max band
     private var boostBaselineRPM: Double = 0
     private var boostPeakRPM: Double = 0
     private var memoryPressureActive = false
@@ -981,7 +982,7 @@ class SystemMonitor: ObservableObject {
             completion(false)
             return
         }
-        guard let maxRPM = fans.map({ $0.maxRPM }).max(), maxRPM > 0 else {
+        guard !fans.isEmpty else {
             completion(false)
             return
         }
@@ -990,13 +991,13 @@ class SystemMonitor: ObservableObject {
             completion(false)
             return
         }
-        let targetRPM = Int(maxRPM * 0.9)
 
         // Quote the helper path for the shell, then escape for the AppleScript literal.
         // The trailing "&" detaches the helper so osascript returns right after auth,
         // which lets us tell a cancelled password prompt apart from a running boost.
+        // The helper computes per-fan targets from the percent and ramps gently.
         let quotedPath = "'" + helperURL.path.replacingOccurrences(of: "'", with: "'\\''") + "'"
-        let shellCmd = "\(quotedPath) boost \(targetRPM) \(Self.boostDuration) > /dev/null 2>&1 &"
+        let shellCmd = "\(quotedPath) boost \(Self.boostPercent) \(Self.boostDuration) > /dev/null 2>&1 &"
         let scriptSrc = shellCmd
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")

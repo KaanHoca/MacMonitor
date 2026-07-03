@@ -9,6 +9,7 @@ Bu dosya projede yapılan önemli işlemleri ve alınan kararları özetler. Yen
 - **Dinamik yükseklik kayması:** pencere artık ekranın hangi kenarına yakınsa o kenar sabitlenerek büyüyor; detaydan dönüşte detaya girmeden önceki kare aynen geri yükleniyor (kullanıcı detaydayken pencereyi taşımadıysa); programatik boyutlandırmalar kayıtlı konumu artık ezmiyor. Eski hatanın UserDefaults'a yazdığı kaymış konum düzeltildi (windowX 16, windowY 1075).
 - **Quick RAM temizliği kendi listesinin tepesine çıkıyordu:** basınç tahsisi malloc yerine mmap/munmap ile yapılıyor (sayfalar OS'e anında dönüyor) ve işlem sırasında süreç listesi yenilemesi duraklatılıyor.
 - Test kancası eklendi: `-debugReturnAfter <saniye>` detaydan otomatik dönüş (konum doğrulaması için).
+- **Boost yumuşatıldı ve hedef düşürüldü (kullanıcı isteği):** helper protokolü mutlak RPM yerine yüzdeye geçti (`boost <percent> <duration>`). Hedef her fanın kendi min-max bandının %70'i (kullanıcının fanında 3730 RPM; eskiden 4410 idi), mutlak maksimumun %90'ı sert tavan. 30 saniyelik döngü: 6 sn smoothstep rampa yukarı, 14 sn sabit, 10 sn rampa aşağı, sonra otomatik moda devir. SIGINT/SIGTERM/SIGHUP yakalanıyor, süreç kesilirse fanlar manuel modda kalmıyor.
 
 ## Sürüm 2.0 (Temmuz 2026)
 

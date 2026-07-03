@@ -1,7 +1,10 @@
 // FanHelper — Standalone CLI tool for SMC fan control
 // Compiled separately and run with admin privileges via osascript.
-// Usage: FanHelper boost <target_rpm> <duration_seconds>
+// Usage: FanHelper boost <percent 10-100> <duration_seconds>
 //        FanHelper auto
+// The boost ramps each fan gently from its current speed to a target inside
+// its own controllable band, holds, ramps back down and returns control to
+// the automatic thermal controller.
 
 import IOKit
 import Foundation
@@ -86,6 +89,30 @@ func readSMCUInt16(_ key: String) -> UInt16? {
     return (UInt16(outRead.bytes.0) << 8) | UInt16(outRead.bytes.1)
 }
 
+/// Reads a fan value key (RPM style) decoding flt or fpe2 as reported.
+func readFloatValue(_ key: String) -> Double? {
+    guard let info = getKeyInfo(key) else { return nil }
+    var inRead = SMCKeyData()
+    var outRead = SMCKeyData()
+    inRead.key = fourCC(key)
+    inRead.keyInfo.dataSize = info.dataSize
+    inRead.data8 = 5
+    var sz = MemoryLayout<SMCKeyData>.size
+    let kr = IOConnectCallStructMethod(conn, 2, &inRead, sz, &outRead, &sz)
+    guard kr == kIOReturnSuccess else { return nil }
+    if info.dataType == fourCC("flt ") && info.dataSize == 4 {
+        let val = withUnsafePointer(to: outRead.bytes) { ptr in
+            ptr.withMemoryRebound(to: Float32.self, capacity: 1) { $0.pointee }
+        }
+        return Double(val)
+    }
+    if info.dataType == fourCC("fpe2") && info.dataSize >= 2 {
+        let raw = (UInt16(outRead.bytes.0) << 8) | UInt16(outRead.bytes.1)
+        return Double(raw) / 4.0
+    }
+    return nil
+}
+
 func writeSMCRaw(_ key: String, bytes: [UInt8]) -> Bool {
     guard let info = getKeyInfo(key) else { return false }
     var inW = SMCKeyData()
@@ -168,7 +195,23 @@ func writeTarget(_ key: String, rpm: Int) -> Bool {
     return false
 }
 
-func boostFans(targetRPM: Int, duration: Int) {
+/// Steps all fans from one RPM set to another with smoothstep easing, so
+/// spin-up and spin-down feel gradual instead of slamming to the target.
+func ramp(fanCount: Int, from: [Int], to: [Int], seconds: Double) {
+    let stepInterval = 0.5
+    let steps = max(Int(seconds / stepInterval), 1)
+    for step in 1...steps {
+        let t = Double(step) / Double(steps)
+        let eased = t * t * (3 - 2 * t)
+        for i in 0..<fanCount where to[i] > 0 {
+            let rpm = Double(from[i]) + (Double(to[i]) - Double(from[i])) * eased
+            _ = writeTarget("F\(i)Tg", rpm: Int(rpm))
+        }
+        Thread.sleep(forTimeInterval: stepInterval)
+    }
+}
+
+func boostFans(percent: Int, duration: Int) {
     guard let countByte = readSMCByte("FNum") else {
         fputs("Error: Cannot read fan count\n", stderr)
         exit(1)
@@ -179,22 +222,45 @@ func boostFans(targetRPM: Int, duration: Int) {
         exit(1)
     }
 
-    var anySet = false
+    let level = Double(min(max(percent, 10), 100)) / 100.0
+
+    // Per-fan targets: `level` percent into each fan's own controllable
+    // band, hard-capped at 90% of its absolute max to spare the bearings.
+    var targets: [Int] = []
+    var baselines: [Int] = []
     for i in 0..<fanCount {
-        let manualOK = setManual(i, manual: true)
-        let targetOK = writeTarget("F\(i)Tg", rpm: targetRPM)
-        if manualOK && targetOK { anySet = true }
+        let minRPM = readFloatValue("F\(i)Mn") ?? 0
+        let maxRPM = readFloatValue("F\(i)Mx") ?? 0
+        let current = readFloatValue("F\(i)Ac") ?? minRPM
+        guard maxRPM > minRPM else {
+            targets.append(0)
+            baselines.append(0)
+            continue
+        }
+        let target = min(minRPM + level * (maxRPM - minRPM), maxRPM * 0.9)
+        targets.append(Int(target))
+        baselines.append(Int(min(max(current, minRPM), maxRPM)))
     }
 
+    var anySet = false
+    for i in 0..<fanCount where targets[i] > 0 {
+        if setManual(i, manual: true) { anySet = true }
+    }
     guard anySet else {
         fputs("Error: SMC rejected fan control writes\n", stderr)
         exit(1)
     }
 
-    // Wait for the boost duration
-    Thread.sleep(forTimeInterval: Double(duration))
+    // Gentle cycle inside the total duration: ramp up, hold, ramp down.
+    let rampUp = min(6.0, Double(duration) * 0.3)
+    let rampDown = min(10.0, Double(duration) * 0.4)
+    let hold = max(Double(duration) - rampUp - rampDown, 0)
 
-    // Revert to auto mode
+    ramp(fanCount: fanCount, from: baselines, to: targets, seconds: rampUp)
+    Thread.sleep(forTimeInterval: hold)
+    ramp(fanCount: fanCount, from: targets, to: baselines, seconds: rampDown)
+
+    // Hand control back to the automatic thermal controller
     for i in 0..<fanCount {
         _ = setManual(i, manual: false)
     }
@@ -215,16 +281,21 @@ guard openSMC() else {
     exit(1)
 }
 
+// Never leave fans stuck in manual mode if the process is interrupted
+signal(SIGINT) { _ in revertFans(); exit(0) }
+signal(SIGTERM) { _ in revertFans(); exit(0) }
+signal(SIGHUP) { _ in revertFans(); exit(0) }
+
 let args = CommandLine.arguments
 
 if args.count >= 3 && args[1] == "boost" {
-    let targetRPM = Int(args[2]) ?? 5000
+    let percent = Int(args[2]) ?? 70
     let duration = args.count >= 4 ? (Int(args[3]) ?? 30) : 30
-    boostFans(targetRPM: targetRPM, duration: duration)
+    boostFans(percent: percent, duration: duration)
 } else if args.count >= 2 && args[1] == "auto" {
     revertFans()
 } else {
-    fputs("Usage: FanHelper boost <target_rpm> [duration_seconds]\n", stderr)
+    fputs("Usage: FanHelper boost <percent 10-100> [duration_seconds]\n", stderr)
     fputs("       FanHelper auto\n", stderr)
     exit(1)
 }
