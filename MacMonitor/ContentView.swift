@@ -153,6 +153,8 @@ struct ContentView: View {
                                 value: String(format: "%.0f%%", monitor.cpuUsage),
                                 percent: monitor.cpuUsage / 100,
                                 color: tc.ring,
+                                warnAt: 0.85,
+                                critAt: 0.95,
                                 tappable: true,
                                 matchID: "ring-cpu",
                                 ns: ringNS
@@ -160,7 +162,6 @@ struct ContentView: View {
                         },
                         secondary: {
                             Sparkline(store: monitor.history, metric: .cpu, maxValue: 100, color: tc.ring)
-                                .frame(width: 64, height: 14)
                         }
                     )
 
@@ -178,6 +179,8 @@ struct ContentView: View {
                                 value: String(format: "%.1fG", monitor.usedRAM),
                                 percent: monitor.totalRAM > 0 ? monitor.usedRAM / monitor.totalRAM : 0,
                                 color: tc.ring,
+                                warnAt: 0.85,
+                                critAt: 0.95,
                                 tappable: true,
                                 dropBounce: monitor.purgeJustCompleted,
                                 matchID: "ring-ram",
@@ -186,7 +189,6 @@ struct ContentView: View {
                         },
                         secondary: {
                             Sparkline(store: monitor.history, metric: .ram, maxValue: max(monitor.totalRAM, 1), color: tc.ring)
-                                .frame(width: 64, height: 14)
                         }
                     )
                     .onChange(of: monitor.purgeJustCompleted) { newVal in
@@ -211,13 +213,19 @@ struct ContentView: View {
                                 value: monitor.diskLabel,
                                 percent: monitor.diskPercent / 100,
                                 color: tc.disk,
+                                warnAt: 0.90,
+                                critAt: 0.97,
                                 tappable: true,
                                 matchID: "ring-disk",
                                 ns: ringNS
                             )
                         },
                         secondary: {
-                            DiskCleanableBadge(cleaner: monitor.diskCleaner, accent: tc.accent)
+                            DiskCleanableBadge(
+                                cleaner: monitor.diskCleaner,
+                                accent: tc.accent,
+                                freeText: monitor.diskFree > 0 ? String(format: "%.0fG free", monitor.diskFree) : ""
+                            )
                         }
                     )
 
@@ -235,6 +243,8 @@ struct ContentView: View {
                                 value: monitor.cpuTemp > 0 ? String(format: "%.0f°C", monitor.cpuTemp) : "--",
                                 percent: monitor.cpuTemp > 0 ? min(monitor.cpuTemp / 100, 1.0) : 0,
                                 color: tc.temp,
+                                warnAt: 0.85,
+                                critAt: 0.95,
                                 tappable: true,
                                 matchID: "ring-temp",
                                 ns: ringNS
@@ -243,13 +253,12 @@ struct ContentView: View {
                         secondary: {
                             if monitor.fans.isEmpty {
                                 Sparkline(store: monitor.history, metric: .temp, maxValue: 0, color: tc.temp)
-                                    .frame(width: 64, height: 14)
                             } else {
                                 HStack(spacing: 3) {
                                     Image(systemName: "fan.fill")
                                         .font(.system(size: 8))
                                     // String(format:) avoids locale digit grouping in Text
-                                    Text(String(format: "%d rpm", Int(avgFanRPM)))
+                                    Text(String(format: "%d rpm", Int(avgFanRPM.rounded())))
                                         .font(.system(size: 9, weight: .semibold, design: .rounded))
                                 }
                                 .foregroundStyle(tc.temp.opacity(0.65))
@@ -385,8 +394,10 @@ struct ContentView: View {
     ) -> some View {
         VStack(spacing: 6) {
             gauge()
+            // Fixed slot: identical width and height in all four cells keeps
+            // the grid optically symmetric regardless of the content shown
             secondary()
-                .frame(height: 14)
+                .frame(width: 76, height: 14)
         }
         .frame(maxWidth: .infinity)
         .contentShape(Rectangle())
@@ -648,74 +659,58 @@ struct ProcessListView: View {
 }
 
 // MARK: - Gauge Cell
+
+/// One dial of the grid. Geometry is fixed and identical for every cell:
+/// hover feedback only brightens the unlit ticks and the icon, it never
+/// scales, blurs or shadows the dial, so all four always render equal.
 struct GaugeCell: View {
     let icon: String
     let value: String
     let percent: Double
     let color: Color
+    var warnAt: Double? = nil
+    var critAt: Double? = nil
     var tappable: Bool = false
     var dropBounce: Bool = false
     let matchID: String
     let ns: Namespace.ID
 
-    @State private var glowPhase: Bool = false
     @State private var isHovered = false
     @State private var bounceOffset: CGFloat = 0
     @State private var bounceScale: CGFloat = 1.0
 
-    private let ringSize: CGFloat = 80
+    private let dialSize: CGFloat = 80
 
     var body: some View {
         ZStack {
-            // Soft glow behind ring for tappable gauges
-            if tappable {
-                Circle()
-                    .fill(color.opacity(glowPhase ? 0.12 : 0.04))
-                    .frame(width: ringSize - 4, height: ringSize - 4)
-                    .blur(radius: glowPhase ? 14 : 8)
-                    .animation(
-                        .easeInOut(duration: 2.5).repeatForever(autoreverses: true),
-                        value: glowPhase
-                    )
-            }
-
-            // Hover: full circle outline glow
-            if tappable {
-                Circle()
-                    .stroke(color.opacity(isHovered ? 0.35 : 0), lineWidth: 2)
-                    .frame(width: ringSize + 6, height: ringSize + 6)
-                    .blur(radius: 5)
-                    .animation(.easeOut(duration: 0.3), value: isHovered)
-            }
-
-            RingGauge(percent: percent, color: color, lineWidth: 6)
-                .matchedGeometryEffect(id: matchID, in: ns)
-                .shadow(color: tappable ? color.opacity(0.3) : .clear, radius: 5)
+            TickGauge(
+                percent: percent,
+                color: color,
+                warnAt: warnAt,
+                critAt: critAt,
+                highlight: isHovered && tappable
+            )
+            .matchedGeometryEffect(id: matchID, in: ns)
+            .animation(.easeOut(duration: 0.7), value: percent)
 
             VStack(spacing: 1) {
                 Image(systemName: icon)
                     .font(.system(size: 11))
-                    .foregroundStyle(.white.opacity(0.5))
+                    .foregroundStyle(.white.opacity(isHovered && tappable ? 0.8 : 0.5))
                 Text(value)
                     .font(.system(size: 13, weight: .semibold, design: .rounded))
                     .foregroundStyle(.white.opacity(0.9))
                     .minimumScaleFactor(0.5)
                     .lineLimit(1)
             }
-            .padding(.horizontal, 4)
+            .padding(.horizontal, 8)
+            .animation(.easeOut(duration: 0.2), value: isHovered)
         }
-        .frame(width: ringSize, height: ringSize)
-        .scaleEffect(isHovered && tappable ? 1.06 : bounceScale)
+        .frame(width: dialSize, height: dialSize)
+        .scaleEffect(bounceScale)
         .offset(y: bounceOffset)
-        .animation(.easeOut(duration: 0.2), value: isHovered)
         .onHover { hovering in
             isHovered = hovering
-        }
-        .onAppear {
-            // Respect the system Reduce Motion setting: skip the breathing glow
-            if tappable && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
-                glowPhase = true
-            }
         }
         .onChange(of: dropBounce) { newVal in
             if newVal {
@@ -738,11 +733,13 @@ struct GaugeCell: View {
 
 // MARK: - Disk Cleanable Badge
 
-/// Small badge under the disk gauge showing how much space a scan found.
-/// Observes the cleaner directly so scan results appear without a grid redraw.
+/// Small badge under the disk gauge: cleanable size after a scan, free
+/// space beforehand. Observes the cleaner directly so scan results appear
+/// without a grid redraw.
 struct DiskCleanableBadge: View {
     @ObservedObject var cleaner: DiskCleaner
     let accent: Color
+    let freeText: String
 
     var body: some View {
         if cleaner.hasScanned && cleaner.totalCleanableSize > 100_000_000 {
@@ -753,6 +750,10 @@ struct DiskCleanableBadge: View {
                     .font(.system(size: 9, weight: .semibold, design: .rounded))
             }
             .foregroundStyle(accent.opacity(0.75))
+        } else if !freeText.isEmpty {
+            Text(freeText)
+                .font(.system(size: 9, weight: .medium, design: .rounded))
+                .foregroundStyle(.white.opacity(0.35))
         }
     }
 }

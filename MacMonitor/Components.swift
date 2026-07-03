@@ -17,24 +17,63 @@ extension Notification.Name {
     static let mmResizeWindow = Notification.Name("MacMonitorResizeWindow")
 }
 
-// MARK: - Ring Gauge
+// MARK: - Tick Gauge
 
-/// Plain progress ring shared by the gauge grid and the detail headers.
-/// Kept minimal so matchedGeometryEffect can interpolate it cleanly.
-struct RingGauge: View {
-    let percent: Double
+/// Instrument-style dial: discrete radial tick marks lit up to the current
+/// value, with brightness ramping toward the tip. Drawn in a single Canvas
+/// so every gauge renders with pixel-identical geometry; there is no blur,
+/// no shadow and no round-cap arc that could make dials read as unequal.
+/// Ticks turn orange past `warnAt` and red past `critAt`.
+struct TickGauge: View, Animatable {
+    var percent: Double
     let color: Color
-    let lineWidth: CGFloat
+    var tickCount: Int = 44
+    var warnAt: Double? = nil
+    var critAt: Double? = nil
+    var highlight: Bool = false
+
+    var animatableData: Double {
+        get { percent }
+        set { percent = newValue }
+    }
 
     var body: some View {
-        ZStack {
-            Circle()
-                .stroke(Color.white.opacity(0.06), lineWidth: lineWidth)
-            Circle()
-                .trim(from: 0, to: CGFloat(min(max(percent, 0), 1.0)))
-                .stroke(color, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
-                .rotationEffect(.degrees(-90))
-                .animation(.easeInOut(duration: 0.6), value: percent)
+        Canvas { context, size in
+            let clamped = min(max(percent, 0), 1)
+            let center = CGPoint(x: size.width / 2, y: size.height / 2)
+            let outer = min(size.width, size.height) / 2 - 1
+            let tickLength = max(outer * 0.20, 3)
+            let inner = outer - tickLength
+            let lineWidth = max(outer * 0.055, 1.1)
+            let lit = clamped * Double(tickCount)
+
+            let activeColor: Color = {
+                if let crit = critAt, clamped >= crit { return Color(red: 0.90, green: 0.30, blue: 0.30) }
+                if let warn = warnAt, clamped >= warn { return Color(red: 0.95, green: 0.65, blue: 0.30) }
+                return color
+            }()
+
+            for i in 0..<tickCount {
+                let angle = Double(i) / Double(tickCount) * 2 * .pi - .pi / 2
+                let cosA = CGFloat(cos(angle))
+                let sinA = CGFloat(sin(angle))
+                var path = Path()
+                path.move(to: CGPoint(x: center.x + inner * cosA, y: center.y + inner * sinA))
+                path.addLine(to: CGPoint(x: center.x + outer * cosA, y: center.y + outer * sinA))
+
+                // Fractional fill of the newest tick keeps the sweep smooth
+                let fill = min(max(lit - Double(i), 0), 1)
+                let tickColor: Color
+                if fill > 0 {
+                    let positionInArc = (Double(i) + 0.5) / max(lit, 0.001)
+                    let ramp = 0.55 + 0.45 * min(positionInArc, 1)
+                    tickColor = activeColor.opacity(ramp * fill + 0.09 * (1 - fill))
+                } else {
+                    tickColor = Color.white.opacity(highlight ? 0.16 : 0.09)
+                }
+                context.stroke(path, with: .color(tickColor),
+                               style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
+            }
         }
     }
 }
@@ -201,7 +240,7 @@ struct DetailHeader: View {
             }
             .buttonStyle(.plain)
 
-            RingGauge(percent: percent, color: color, lineWidth: 3)
+            TickGauge(percent: percent, color: color, tickCount: 28)
                 .matchedGeometryEffect(id: matchID, in: ns)
                 .frame(width: 22, height: 22)
 

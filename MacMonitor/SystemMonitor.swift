@@ -89,6 +89,7 @@ class SystemMonitor: ObservableObject {
     @Published var totalRAM: Double = 0
     @Published var diskPercent: Double = 0
     @Published var diskLabel: String = "—"
+    @Published var diskFree: Double = 0   // GB
     @Published var cpuTemp: Double = 0
     @Published var topRAMProcesses: [ProcessEntry] = []
     @Published var topCPUProcesses: [ProcessEntry] = []
@@ -240,6 +241,8 @@ class SystemMonitor: ObservableObject {
                     let roundedDisk = (disk.percent * 10).rounded() / 10
                     if self.diskPercent != roundedDisk { self.diskPercent = roundedDisk }
                     if self.diskLabel != disk.label { self.diskLabel = disk.label }
+                    let roundedFree = disk.freeGB.rounded()
+                    if self.diskFree != roundedFree { self.diskFree = roundedFree }
                 }
 
                 let roundedTemp = temp.rounded()
@@ -329,17 +332,18 @@ class SystemMonitor: ObservableObject {
     }
 
     // MARK: - Disk
-    private func getDisk() -> (label: String, percent: Double) {
+    private func getDisk() -> (label: String, percent: Double, freeGB: Double) {
         guard let attrs = try? FileManager.default.attributesOfFileSystem(forPath: "/"),
               let total = attrs[.systemSize] as? Int64,
               let free  = attrs[.systemFreeSize] as? Int64 else {
-            return ("—", 0)
+            return ("—", 0, 0)
         }
         let used    = total - free
         let percent = Double(used) / Double(total) * 100.0
         let usedGB  = Double(used) / 1_073_741_824
         let totalGB = Double(total) / 1_073_741_824
-        return (String(format: "%.0f/%.0fG", usedGB, totalGB), percent)
+        let freeGB  = Double(free) / 1_073_741_824
+        return (String(format: "%.0f/%.0fG", usedGB, totalGB), percent, freeGB)
     }
 
     // MARK: - Quick Purge (Memory Pressure)

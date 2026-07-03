@@ -9,7 +9,7 @@ A lightweight, native macOS desktop widget that displays real-time system metric
 
 ## Features
 
-- **2x2 Circular Gauges** — CPU, Memory, Disk, Temperature with live sparklines and secondary info under each ring
+- **2x2 Instrument Dials** — tick-based gauges for CPU, Memory, Disk and Temperature with live sparklines and secondary info; ticks shift to orange/red past warning and critical thresholds
 - **Live Ring Transitions** — tap a gauge and its ring flies into the detail header, staying live while the detail is open
 - **Dynamic Window Height** — the widget grows for detail views and shrinks back, bottom edge anchored
 - **Thermals View** — CPU temperature history graph, per-fan cards, RPM history and a fan boost with selectable duration (admin, gentle ramp)
@@ -121,7 +121,7 @@ MacMonitor/
 ├── MacMonitor/
 │   ├── MacMonitorApp.swift      # App entry, window, menu bar, keep awake, resizing
 │   ├── ContentView.swift        # Gauge grid, process lists, disk cleanup, thermals
-│   ├── Components.swift         # RingGauge, Sparkline, HistoryGraph, HistoryStore
+│   ├── Components.swift         # TickGauge, Sparkline, HistoryGraph, HistoryStore
 │   ├── SystemMonitor.swift      # Metrics engine, alerts, purge, themes
 │   ├── DiskCleaner.swift        # Disk cleanup engine (19 categories)
 │   ├── FanHelper.swift          # Admin fan control helper (separate binary)
