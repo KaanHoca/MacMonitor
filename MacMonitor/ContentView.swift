@@ -80,6 +80,9 @@ struct ContentView: View {
                     accent: tc.accent,
                     tempColor: tc.temp,
                     currentTemp: monitor.cpuTemp,
+                    systemPowerW: monitor.systemPowerW,
+                    cpuPowerW: monitor.cpuPowerW,
+                    dcInPowerW: monitor.dcInPowerW,
                     boostActive: monitor.fanBoostActive,
                     boostSeconds: monitor.fanBoostSecondsRemaining,
                     boostNoEffect: monitor.fanBoostNoEffect,
@@ -833,6 +836,9 @@ struct ThermalsView: View {
     let accent: Color
     let tempColor: Color
     let currentTemp: Double
+    let systemPowerW: Double
+    let cpuPowerW: Double
+    let dcInPowerW: Double
     let boostActive: Bool
     let boostSeconds: Int
     let boostNoEffect: Bool
@@ -889,6 +895,27 @@ struct ThermalsView: View {
                         .padding(.vertical, 6)
                     }
 
+                    if systemPowerW > 0 {
+                        sectionLabel("POWER")
+                            .padding(.top, 4)
+                        HStack(spacing: 0) {
+                            powerStat("System", systemPowerW)
+                            if cpuPowerW > 0 { powerStat("CPU", cpuPowerW) }
+                            if dcInPowerW > 0 { powerStat("DC In", dcInPowerW) }
+                        }
+                        if history.power.count > 1 {
+                            HistoryGraph(series: [history.power], maxValue: 0, color: accent)
+                                .frame(height: 56)
+                            HStack {
+                                Text(String(format: "min %.1f W", history.power.min() ?? 0))
+                                Spacer()
+                                Text(String(format: "max %.1f W", history.power.max() ?? 0))
+                            }
+                            .font(.system(size: 9, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.3))
+                        }
+                    }
+
                     if fans.isEmpty {
                         HStack(spacing: 6) {
                             Image(systemName: "fan.slash")
@@ -936,6 +963,18 @@ struct ThermalsView: View {
             .font(.system(size: 9, weight: .bold))
             .foregroundStyle(.white.opacity(0.25))
             .padding(.leading, 2)
+    }
+
+    private func powerStat(_ label: String, _ watts: Double) -> some View {
+        VStack(spacing: 2) {
+            Text(String(format: "%.1f W", watts))
+                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .foregroundStyle(.white.opacity(0.85))
+            Text(label)
+                .font(.system(size: 8, weight: .medium))
+                .foregroundStyle(.white.opacity(0.35))
+        }
+        .frame(maxWidth: .infinity)
     }
 
     private func fanCard(_ fan: FanInfo) -> some View {
