@@ -13,6 +13,7 @@ Bu dosya projede yapılan önemli işlemleri ve alınan kararları özetler. Yen
 - **RAM detayına swap ve bellek basıncı** eklendi: vm.swapusage ile kullanılan/toplam swap, kern.memorystatus_vm_pressure_level ile basınç seviyesi (Normal/Warning/Critical) gösteriliyor. Swap sysctl'i okunamazsa satır tamamen gizleniyor.
 - **Disk detayına anlık okuma/yazma hızı** eklendi: IOBlockStorageDriver'ın Statistics sözlüğünden alınan bayt sayaçlarının tikler arası farkından hesaplanıyor. Önemli düzeltme: gerçek yazma anahtarı "Bytes (Write)"; planda "Bytes (Written)" olarak geçiyordu ama bu anahtar IOBlockStorageDriver Statistics sözlüğünde yok, gerçek anahtar probe ile doğrulanıp koda öyle yazıldı. İlk delta örneği alınana kadar satır gizli kalıyor.
 - **Genel kural:** güç, swap ve disk I/O satırlarının hepsi veri kaynağı okunamadığında sıfır veya sahte değer göstermek yerine tamamen gizleniyor; bu, projenin dürüst arayüz ilkesiyle tutarlı.
+- Sürüm kullanıcı tarafından canlı menü kontrolüyle doğrulandı (Widget Rows aç/kapa, canlı boyutlanma, konum sabit), /Applications'a kuruldu ve GitHub'a yayınlandı.
 
 ## Sürüm 2.0.1 Düzeltmeleri (Temmuz 2026, kullanıcı geri bildirimi)
 
