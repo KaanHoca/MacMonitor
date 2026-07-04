@@ -95,6 +95,9 @@ class SystemMonitor: ObservableObject {
     @Published var systemPowerW: Double = 0   // watts, 0 = no readable power key
     @Published var cpuPowerW: Double = 0      // CPU package watts (Thermals breakdown)
     @Published var dcInPowerW: Double = 0     // DC input watts (Thermals breakdown)
+    @Published var swapUsedGB: Double = 0
+    @Published var swapTotalGB: Double = -1   // -1 = sysctl unavailable, hide row
+    @Published var memoryPressureLevel: Int = 0  // 0 unknown, 1 normal, 2 warning, 4 critical
     @Published var topRAMProcesses: [ProcessEntry] = []
     @Published var topCPUProcesses: [ProcessEntry] = []
     @Published var purgeJustCompleted: Bool = false
@@ -231,6 +234,8 @@ class SystemMonitor: ObservableObject {
             let temp = self.getTemp()
             let fanData = self.getFans()
             let power = self.getPower()
+            let swap = self.getSwap()
+            let pressure = self.getMemoryPressureLevel()
 
             self.publishOnMain {
                 // Only update published properties when values actually changed
@@ -261,6 +266,14 @@ class SystemMonitor: ObservableObject {
                 if self.cpuPowerW != roundedCPUPower { self.cpuPowerW = roundedCPUPower }
                 let roundedDCIn = (power.dcIn * 10).rounded() / 10
                 if self.dcInPowerW != roundedDCIn { self.dcInPowerW = roundedDCIn }
+
+                if let swap = swap {
+                    let roundedSwapUsed = (swap.used * 100).rounded() / 100
+                    let roundedSwapTotal = (swap.total * 100).rounded() / 100
+                    if self.swapUsedGB != roundedSwapUsed { self.swapUsedGB = roundedSwapUsed }
+                    if self.swapTotalGB != roundedSwapTotal { self.swapTotalGB = roundedSwapTotal }
+                }
+                if self.memoryPressureLevel != pressure { self.memoryPressureLevel = pressure }
 
                 // Update fan data only when it actually changed
                 if self.fans != fanData { self.fans = fanData }
@@ -344,6 +357,22 @@ class SystemMonitor: ObservableObject {
         let usedBytes  = Double(stats.active_count + stats.wire_count + stats.compressor_page_count) * pageSize
 
         return (usedBytes / 1_073_741_824, totalBytes / 1_073_741_824)
+    }
+
+    // MARK: - Swap & Memory Pressure
+    private func getSwap() -> (used: Double, total: Double)? {
+        var usage = xsw_usage()
+        var size = MemoryLayout<xsw_usage>.size
+        guard sysctlbyname("vm.swapusage", &usage, &size, nil, 0) == 0 else { return nil }
+        let gb = 1024.0 * 1024.0 * 1024.0
+        return (Double(usage.xsu_used) / gb, Double(usage.xsu_total) / gb)
+    }
+
+    private func getMemoryPressureLevel() -> Int {
+        var level: Int32 = 0
+        var size = MemoryLayout<Int32>.size
+        guard sysctlbyname("kern.memorystatus_vm_pressure_level", &level, &size, nil, 0) == 0 else { return 0 }
+        return Int(level)
     }
 
     // MARK: - Disk

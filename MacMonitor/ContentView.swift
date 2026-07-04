@@ -41,7 +41,11 @@ struct ContentView: View {
                     onAction: { done in monitor.quickPurgeRAM(completion: done) },
                     secondaryIcon: "lock.fill",
                     secondaryLabel: "Purge",
-                    onSecondaryAction: { done in monitor.purgeRAM(completion: done) }
+                    onSecondaryAction: { done in monitor.purgeRAM(completion: done) },
+                    infoIcon: "arrow.left.arrow.right",
+                    infoText: swapText,
+                    infoDetail: pressureLabel,
+                    infoDetailColor: pressureColor
                 )
                 .transition(.opacity)
             case .cpu:
@@ -464,6 +468,30 @@ struct ContentView: View {
         mb >= 1024 ? String(format: "%.1f GB", mb / 1024) : String(format: "%.0f MB", mb)
     }
 
+    private var swapText: String? {
+        guard monitor.swapTotalGB >= 0 else { return nil }
+        if monitor.swapTotalGB == 0 { return "Swap: not in use" }
+        return String(format: "Swap: %.1f / %.1f GB", monitor.swapUsedGB, monitor.swapTotalGB)
+    }
+
+    private var pressureLabel: String? {
+        switch monitor.memoryPressureLevel {
+        case 1: return "Normal"
+        case 2: return "Warning"
+        case 4: return "Critical"
+        default: return nil
+        }
+    }
+
+    private var pressureColor: Color {
+        switch monitor.memoryPressureLevel {
+        case 1: return .green
+        case 2: return .orange
+        case 4: return .red
+        default: return .white
+        }
+    }
+
     // KB/s value → formatted string
     func formatSpeed(_ kbps: Double) -> String {
         if kbps < 1 { return "0 K/s" }
@@ -499,6 +527,10 @@ struct ProcessListView: View {
     var secondaryIcon: String? = nil
     var secondaryLabel: String? = nil
     var onSecondaryAction: ((@escaping (Bool, String?) -> Void) -> Void)? = nil
+    var infoIcon: String? = nil
+    var infoText: String? = nil
+    var infoDetail: String? = nil
+    var infoDetailColor: Color = .white
     @State private var actionState: ActionState = .idle
     @State private var actionDetail: String? = nil
     @State private var spinAngle: Double = 0
@@ -519,6 +551,32 @@ struct ProcessListView: View {
                 ns: ns,
                 onBack: onBack
             )
+
+            if infoText != nil || infoDetail != nil {
+                HStack(spacing: 6) {
+                    if let infoIcon = infoIcon {
+                        Image(systemName: infoIcon)
+                            .font(.system(size: 10))
+                            .foregroundStyle(.white.opacity(0.35))
+                    }
+                    if let infoText = infoText {
+                        Text(infoText)
+                            .font(.system(size: 10, weight: .medium, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.6))
+                    }
+                    Spacer()
+                    if let infoDetail = infoDetail {
+                        Circle()
+                            .fill(infoDetailColor)
+                            .frame(width: 6, height: 6)
+                        Text(infoDetail)
+                            .font(.system(size: 10, weight: .medium, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.6))
+                    }
+                }
+                .padding(.leading, 2)
+                .padding(.bottom, 8)
+            }
 
             // Section label
             Text("TOP PROCESSES")
