@@ -9,6 +9,9 @@ struct ContentView: View {
     @ObservedObject var monitor: SystemMonitor
     @State private var detail: DetailMode = .none
     @Namespace private var ringNS
+    @AppStorage("widgetRow_power") private var showPowerRow = true
+    @AppStorage("widgetRow_network") private var showNetworkRow = true
+    @AppStorage("widgetRow_ip") private var showIPRow = true
 
     private var tc: ThemeColors { monitor.theme.colors }
     private let detailAnimation = Animation.spring(response: 0.32, dampingFraction: 0.86)
@@ -92,12 +95,18 @@ struct ContentView: View {
         .background(Color.clear)
         .onChange(of: detail) { newDetail in
             let isDetail = newDetail != .none
-            let height = isDetail
-                ? UILayout.detailHeight
-                : UILayout.mainHeight(hasBattery: monitor.batteryPresent)
+            let height = isDetail ? UILayout.detailHeight : currentMainHeight
             NotificationCenter.default.post(
                 name: .mmResizeWindow, object: nil,
                 userInfo: ["height": height, "isDetail": isDetail]
+            )
+        }
+        .onChange(of: currentMainHeight) { newHeight in
+            // Row toggles and late power discovery resize the grid live
+            guard detail == .none else { return }
+            NotificationCenter.default.post(
+                name: .mmResizeWindow, object: nil,
+                userInfo: ["height": newHeight, "isDetail": false]
             )
         }
         .onAppear {
@@ -132,6 +141,19 @@ struct ContentView: View {
     private func closeDetail() {
         monitor.activeDetail = "none"
         withAnimation(detailAnimation) { detail = .none }
+    }
+
+    // The power row needs both the user toggle and actual data; on Macs
+    // without a readable power key the row never appears.
+    private var powerRowVisible: Bool { showPowerRow && monitor.systemPowerW > 0 }
+
+    private var currentMainHeight: CGFloat {
+        UILayout.mainHeight(
+            hasBattery: monitor.batteryPresent,
+            showPower: powerRowVisible,
+            showNetwork: showNetworkRow,
+            showIP: showIPRow
+        )
     }
 
     var gaugeGrid: some View {
@@ -256,98 +278,22 @@ struct ContentView: View {
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
 
-            // Network stats row
-            HStack(spacing: 0) {
-                HStack(spacing: 4) {
-                    Image(systemName: "arrow.down.circle.fill")
-                        .font(.system(size: 11))
-                        .foregroundStyle(tc.accent.opacity(0.6))
-                    Text(formatSpeed(monitor.downloadSpeed))
-                        .font(.system(size: 11, weight: .semibold, design: .rounded))
-                        .foregroundStyle(.white.opacity(0.75))
+            // Info rows below the separator. Each row can be hidden from
+            // the menu bar "Widget Rows" submenu; fixed heights keep the
+            // window height math in UILayout.mainHeight exact.
+            VStack(spacing: UILayout.infoRowSpacing) {
+                if powerRowVisible {
+                    powerRow.frame(height: UILayout.powerRowHeight)
                 }
-                .frame(maxWidth: .infinity)
-
-                HStack(spacing: 4) {
-                    Image(systemName: "network")
-                        .font(.system(size: 11))
-                        .foregroundStyle(pingColor(monitor.ping).opacity(0.6))
-                    Text(monitor.ping < 0 ? "---" : String(format: "%.0fms", monitor.ping))
-                        .font(.system(size: 11, weight: .semibold, design: .rounded))
-                        .foregroundStyle(.white.opacity(0.75))
+                if showNetworkRow {
+                    networkStatsRow.frame(height: UILayout.networkRowHeight)
                 }
-                .frame(maxWidth: .infinity)
-
-                HStack(spacing: 4) {
-                    Image(systemName: "arrow.up.circle.fill")
-                        .font(.system(size: 11))
-                        .foregroundStyle(tc.accent.opacity(0.6))
-                    Text(formatSpeed(monitor.uploadSpeed))
-                        .font(.system(size: 11, weight: .semibold, design: .rounded))
-                        .foregroundStyle(.white.opacity(0.75))
+                if showIPRow {
+                    ipRow.frame(height: UILayout.ipRowHeight)
                 }
-                .frame(maxWidth: .infinity)
-            }
-            .padding(.horizontal, 4)
-
-            Spacer().frame(height: 10)
-
-            // IP addresses row
-            HStack(spacing: 8) {
-                CopyableIPCell(
-                    icon: "globe",
-                    ip: monitor.externalIP,
-                    accent: tc.accent
-                )
-
-                CopyableIPCell(
-                    icon: "wifi",
-                    ip: monitor.localIP,
-                    accent: tc.accent
-                )
-            }
-            .padding(.horizontal, 4)
-
-            // Battery row (portable Macs only)
-            if monitor.batteryPresent {
-                Spacer().frame(height: 8)
-                HStack(spacing: 5) {
-                    Image(systemName: batteryIcon)
-                        .font(.system(size: 10))
-                        .foregroundStyle(tc.accent.opacity(0.6))
-                    Text(String(format: "%.0f%%", monitor.batteryPercent))
-                        .font(.system(size: 10, weight: .semibold, design: .rounded))
-                        .foregroundStyle(.white.opacity(0.75))
-                    if monitor.batteryCharging {
-                        Image(systemName: "bolt.fill")
-                            .font(.system(size: 8))
-                            .foregroundStyle(.yellow.opacity(0.8))
-                    }
-
-                    Spacer()
-
-                    if monitor.batteryHealth > 0 {
-                        HStack(spacing: 3) {
-                            Image(systemName: "heart")
-                                .font(.system(size: 9))
-                            Text(String(format: "%.0f%%", monitor.batteryHealth))
-                                .font(.system(size: 10, weight: .medium, design: .rounded))
-                        }
-                        .foregroundStyle(.white.opacity(0.45))
-                        .help("Battery health relative to design capacity")
-                    }
-                    if monitor.batteryCycles > 0 {
-                        HStack(spacing: 3) {
-                            Image(systemName: "arrow.triangle.2.circlepath")
-                                .font(.system(size: 9))
-                            Text(String(format: "%d", monitor.batteryCycles))
-                                .font(.system(size: 10, weight: .medium, design: .rounded))
-                        }
-                        .foregroundStyle(.white.opacity(0.45))
-                        .help("Battery cycle count")
-                    }
+                if monitor.batteryPresent {
+                    batteryRow.frame(height: UILayout.batteryRowHeight)
                 }
-                .padding(.horizontal, 4)
             }
         }
         .padding(20)
@@ -362,6 +308,113 @@ struct ContentView: View {
         case 10..<30: return "battery.25"
         default: return "battery.0"
         }
+    }
+
+    private var powerRow: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "bolt.fill")
+                .font(.system(size: 11))
+                .foregroundStyle(tc.accent.opacity(0.6))
+            Text(String(format: "%.1f W", monitor.systemPowerW))
+                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                .foregroundStyle(.white.opacity(0.75))
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 4)
+        .help("System power consumption")
+        .accessibilityLabel(String(format: "Power %.1f watts", monitor.systemPowerW))
+    }
+
+    private var networkStatsRow: some View {
+        HStack(spacing: 0) {
+            HStack(spacing: 4) {
+                Image(systemName: "arrow.down.circle.fill")
+                    .font(.system(size: 11))
+                    .foregroundStyle(tc.accent.opacity(0.6))
+                Text(formatSpeed(monitor.downloadSpeed))
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.75))
+            }
+            .frame(maxWidth: .infinity)
+
+            HStack(spacing: 4) {
+                Image(systemName: "network")
+                    .font(.system(size: 11))
+                    .foregroundStyle(pingColor(monitor.ping).opacity(0.6))
+                Text(monitor.ping < 0 ? "---" : String(format: "%.0fms", monitor.ping))
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.75))
+            }
+            .frame(maxWidth: .infinity)
+
+            HStack(spacing: 4) {
+                Image(systemName: "arrow.up.circle.fill")
+                    .font(.system(size: 11))
+                    .foregroundStyle(tc.accent.opacity(0.6))
+                Text(formatSpeed(monitor.uploadSpeed))
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.75))
+            }
+            .frame(maxWidth: .infinity)
+        }
+        .padding(.horizontal, 4)
+    }
+
+    private var ipRow: some View {
+        HStack(spacing: 8) {
+            CopyableIPCell(
+                icon: "globe",
+                ip: monitor.externalIP,
+                accent: tc.accent
+            )
+
+            CopyableIPCell(
+                icon: "wifi",
+                ip: monitor.localIP,
+                accent: tc.accent
+            )
+        }
+        .padding(.horizontal, 4)
+    }
+
+    private var batteryRow: some View {
+        HStack(spacing: 5) {
+            Image(systemName: batteryIcon)
+                .font(.system(size: 10))
+                .foregroundStyle(tc.accent.opacity(0.6))
+            Text(String(format: "%.0f%%", monitor.batteryPercent))
+                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                .foregroundStyle(.white.opacity(0.75))
+            if monitor.batteryCharging {
+                Image(systemName: "bolt.fill")
+                    .font(.system(size: 8))
+                    .foregroundStyle(.yellow.opacity(0.8))
+            }
+
+            Spacer()
+
+            if monitor.batteryHealth > 0 {
+                HStack(spacing: 3) {
+                    Image(systemName: "heart")
+                        .font(.system(size: 9))
+                    Text(String(format: "%.0f%%", monitor.batteryHealth))
+                        .font(.system(size: 10, weight: .medium, design: .rounded))
+                }
+                .foregroundStyle(.white.opacity(0.45))
+                .help("Battery health relative to design capacity")
+            }
+            if monitor.batteryCycles > 0 {
+                HStack(spacing: 3) {
+                    Image(systemName: "arrow.triangle.2.circlepath")
+                        .font(.system(size: 9))
+                    Text(String(format: "%d", monitor.batteryCycles))
+                        .font(.system(size: 10, weight: .medium, design: .rounded))
+                }
+                .foregroundStyle(.white.opacity(0.45))
+                .help("Battery cycle count")
+            }
+        }
+        .padding(.horizontal, 4)
     }
 
     // One dial column: a single tap target and accessibility element.

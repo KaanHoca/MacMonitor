@@ -45,10 +45,22 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        UserDefaults.standard.register(defaults: [
+            "widgetRow_power": true,
+            "widgetRow_network": true,
+            "widgetRow_ip": true
+        ])
+
         NSApp.setActivationPolicy(.accessory)
         setupStatusBar()
 
-        let size = NSSize(width: UILayout.width, height: UILayout.mainHeight(hasBattery: monitor.batteryPresent))
+        let d = UserDefaults.standard
+        let size = NSSize(width: UILayout.width, height: UILayout.mainHeight(
+            hasBattery: monitor.batteryPresent,
+            showPower: d.bool(forKey: "powerKeyAvailable") && d.bool(forKey: "widgetRow_power"),
+            showNetwork: d.bool(forKey: "widgetRow_network"),
+            showIP: d.bool(forKey: "widgetRow_ip")
+        ))
 
         window = NSWindow(
             contentRect: NSRect(origin: .zero, size: size),

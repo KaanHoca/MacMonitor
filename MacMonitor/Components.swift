@@ -6,8 +6,24 @@ enum UILayout {
     static let width: CGFloat = 300
     static let detailHeight: CGFloat = 440
 
-    static func mainHeight(hasBattery: Bool) -> CGFloat {
-        hasBattery ? 368 : 340
+    // Grid section: 20 top padding + two 100pt dial rows with 24 spacing
+    // + separator block (1pt line with 12pt vertical padding) + 20 bottom
+    // padding, plus the small slack the original 340pt window carried.
+    static let gridBase: CGFloat = 293
+    static let infoRowSpacing: CGFloat = 10
+    static let powerRowHeight: CGFloat = 14
+    static let networkRowHeight: CGFloat = 14
+    static let ipRowHeight: CGFloat = 24
+    static let batteryRowHeight: CGFloat = 14
+
+    static func mainHeight(hasBattery: Bool, showPower: Bool, showNetwork: Bool, showIP: Bool) -> CGFloat {
+        var rows: [CGFloat] = []
+        if showPower { rows.append(powerRowHeight) }
+        if showNetwork { rows.append(networkRowHeight) }
+        if showIP { rows.append(ipRowHeight) }
+        if hasBattery { rows.append(batteryRowHeight) }
+        guard !rows.isEmpty else { return gridBase }
+        return gridBase + rows.reduce(0, +) + CGFloat(rows.count - 1) * infoRowSpacing
     }
 }
 
