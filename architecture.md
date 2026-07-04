@@ -96,7 +96,7 @@ The duration is user-selectable in the Thermals view (15/30/45/60/120s, persiste
 
 ## Menu Bar
 
-The status item's dropdown mirrors the widget's live metrics (CPU, Memory, Disk, Temp, Fan, GPU, Power, uptime, load average), refreshed only while the menu is open via `publishOnMain`. The Power line reads `systemPowerW` and hides itself when the SMC has no readable power key. A Widget Rows submenu lets the power, network speed and IP address info rows be shown or hidden independently; the choices are stored under `widgetRow_power`/`widgetRow_network`/`widgetRow_ip` and registered as `true` in `applicationDidFinishLaunching` via `UserDefaults.register(defaults:)`, so upgrades keep every row visible until the user opts out.
+The status item's dropdown mirrors the widget's live metrics (CPU, Memory, Disk, Temp, Fan, Power, GPU, uptime, load average), refreshed only while the menu is open via `publishOnMain`. The Power line reads `systemPowerW` and hides itself when the SMC has no readable power key. A Widget Rows submenu lets the power, network speed and IP address info rows be shown or hidden independently; the choices are stored under `widgetRow_power`/`widgetRow_network`/`widgetRow_ip` and registered as `true` in `applicationDidFinishLaunching` via `UserDefaults.register(defaults:)`, so upgrades keep every row visible until the user opts out.
 
 ## Build
 
