@@ -37,14 +37,16 @@ MacMonitor/
 
 ### HistoryStore
 
-Rolling 60-sample (5 minute) buffers for CPU, RAM, temperature and fan RPM. It is a separate `ObservableObject` deliberately: the Thermals history graphs observe it directly, so per-tick appends do not invalidate the whole gauge grid. Published values on `SystemMonitor` still only change when the underlying value changes.
+Rolling 60-sample (5 minute) buffers for CPU, RAM, temperature, fan RPM and system power. It is a separate `ObservableObject` deliberately: the Thermals history graphs observe it directly, so per-tick appends do not invalidate the whole gauge grid. Published values on `SystemMonitor` still only change when the underlying value changes.
 
 ## UI Structure
 
 - `ContentView` switches between the gauge grid and four detail modes (cpu, ram, disk, fan).
 - Gauges are `TickGauge` dials: discrete radial tick marks drawn in one Canvas, lit up to the value with brightness ramping toward the tip. A single code path draws all four, so their geometry is pixel-identical by construction; there is deliberately no blur, shadow or hover scaling (out-of-phase glow animations previously made equal rings look unequal). Ticks turn orange past a warn threshold and red past a critical threshold (CPU/RAM 85/95%, disk 90/97%, temp 85/95°C).
 - Hero transition: each dial and its detail header mini-dial share a `matchedGeometryEffect` id (`ring-cpu`, `ring-ram`, `ring-disk`, `ring-temp`) in one namespace. Tapping a gauge makes the dial fly into the header, where it stays live.
-- Dynamic window height: `ContentView` posts `.mmResizeWindow` with the target height (340pt grid, 368pt with battery row, 440pt details, see `UILayout`); `AppDelegate.resizeWindow` animates the frame with the bottom edge anchored and clamps into the visible screen.
+- Dynamic window height: `ContentView` posts `.mmResizeWindow` with a target height from `UILayout.mainHeight(hasBattery:showPower:showNetwork:showIP:)`, which adds the fixed grid base to the height of every currently visible info row (`powerRowHeight`/`networkRowHeight`/`ipRowHeight`/`batteryRowHeight`, each separated by `infoRowSpacing`); detail views use a fixed 440pt. `AppDelegate.resizeWindow` animates the frame with the bottom edge anchored and clamps into the visible screen.
+- Below the grid, three info rows (power, network speed, IP addresses) can each be shown or hidden independently from the menu bar's Widget Rows submenu (`widgetRow_power`/`widgetRow_network`/`widgetRow_ip` in UserDefaults, registered `true` by default); the power row also requires a readable SMC key (`monitor.systemPowerW > 0`), so it stays hidden on Macs where none of the candidate keys exist.
+- Detail views add their own context row under the header: `ProcessListView` shows swap usage and memory pressure in the RAM detail, hidden entirely when `vm.swapusage` cannot be read; `DiskCleanupView` shows live read/write throughput, hidden until the first delta sample; `ThermalsView` adds a Power section (system, CPU and DC input wattage) with a `HistoryGraph` fed by `HistoryStore.power`.
 - Dials are 100pt in two symmetric rows. Secondary info lives inside the dial as a small caption under the value: the disk dial shows free space (or the cleanable size after a scan), the temperature dial shows live fan RPM. Center text is capped to the dial's inner circle so it can never overlap the ticks.
 - Accessibility: each gauge column is one accessibility element with a label; tooltips via `.help`; the breathing glow honors Reduce Motion.
 
@@ -54,9 +56,13 @@ Rolling 60-sample (5 minute) buffers for CPU, RAM, temperature and fan RPM. It i
 |---|---|
 | CPU | `host_processor_info`, 64-bit tick sums with wrap-safe deltas |
 | RAM | `host_statistics64` (active + wired + compressor) |
+| Swap | `sysctl vm.swapusage` (used/total, GB); `-1` total means the sysctl is unavailable and the row stays hidden |
+| Memory pressure | `sysctl kern.memorystatus_vm_pressure_level` (0 unknown, 1 normal, 2 warning, 4 critical) |
 | Disk | `FileManager.attributesOfFileSystem` |
+| Disk I/O | `IOBlockStorageDriver` "Statistics" property, byte deltas between ticks; the real keys are `Bytes (Read)` and `Bytes (Write)` (not "Bytes (Written)") |
 | Temperature | SMC via IOKit; candidate keys probed once per launch (M1/M2/M3/M4 `Tp*/Te*/Tf*`, Intel `TC*`), EMA smoothing; 0 renders as `--` |
 | Fans | SMC `FNum`, `F*Ac/Mn/Mx` |
+| Power | SMC via IOKit; system total `PSTR`, CPU package `PHPC`, DC input `PDTR` (fallback `PD0R`), each probed once per launch from a candidate list like the temperature keys; availability is cached in `powerKeyAvailable` and the reading hides everywhere once no candidate resolves |
 | Network speed | `getifaddrs` byte deltas over `en*/bridge*` |
 | Ping | `/sbin/ping -c 1` to 8.8.8.8, parsed |
 | IPs | `getifaddrs` (local, en0 preferred) and `api.ipify.org` (external) |
@@ -87,6 +93,10 @@ The duration is user-selectable in the Thermals view (15/30/45/60/120s, persiste
 ## Alerts
 
 `checkThresholds` runs each tick on the main thread: CPU at 100°C or disk 90% full posts a UserNotifications banner, at most once per hour per condition, toggleable from the menu (`alertsEnabled`, default on). Requests authorization lazily on first alert.
+
+## Menu Bar
+
+The status item's dropdown mirrors the widget's live metrics (CPU, Memory, Disk, Temp, Fan, GPU, Power, uptime, load average), refreshed only while the menu is open via `publishOnMain`. The Power line reads `systemPowerW` and hides itself when the SMC has no readable power key. A Widget Rows submenu lets the power, network speed and IP address info rows be shown or hidden independently; the choices are stored under `widgetRow_power`/`widgetRow_network`/`widgetRow_ip` and registered as `true` in `applicationDidFinishLaunching` via `UserDefaults.register(defaults:)`, so upgrades keep every row visible until the user opts out.
 
 ## Build
 

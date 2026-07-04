@@ -13,12 +13,16 @@ A lightweight, native macOS desktop widget that displays real-time system metric
 - **Live Ring Transitions** — tap a gauge and its ring flies into the detail header, staying live while the detail is open
 - **Dynamic Window Height** — the widget grows for detail views and shrinks back, bottom edge anchored
 - **Thermals View** — CPU temperature history graph, per-fan cards, RPM history and a fan boost with selectable duration (admin, gentle ramp)
+- **Live Power Consumption**: system, CPU package and DC input wattage, shown in the widget, the menu bar and a dedicated Thermals breakdown with its own history graph
 - **Disk Cleanup** — scan and clean 19 categories of junk files safely; recoverable categories go to the Trash instead of being deleted
+- **Disk Read/Write Speed**: live throughput shown in the Disk detail, updated every tick
 - **Memory Cleanup** — Quick (no password) and Purge (admin); both report the actually measured freed amount
+- **Swap and Memory Pressure**: swap usage and the kernel memory pressure level shown in the Memory detail
 - **Battery Info** — charge, health and cycle count on portable Macs (hidden on desktops)
 - **Threshold Alerts** — notification when the CPU hits 100°C or the disk is 90% full (max once per hour, toggleable)
 - **Keep Mac Awake** — one-click sleep prevention from the menu bar
-- **Menu Bar Stats** — CPU, Memory, Disk, Temp, Fan, GPU, uptime and load average; optional compact text mode instead of the icon
+- **Menu Bar Stats** — CPU, Memory, Disk, Temp, Fan, Power, GPU, uptime and load average; optional compact text mode instead of the icon
+- **Widget Rows Menu**: show or hide the power, network speed and IP address rows independently from the menu bar, with the widget height adjusting automatically
 - **Real Sensors** — SMC temperature keys discovered per chip generation (M1 through M4 and Intel)
 - **Network Monitor** — live download/upload speeds, color-coded ping, tap-to-copy external and local IPs
 - **6 Color Themes** — Ocean, Lavender, Emerald, Sunset, Sakura, Mono; single solid-color rings

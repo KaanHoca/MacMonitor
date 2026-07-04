@@ -2,6 +2,18 @@
 
 Bu dosya projede yapılan önemli işlemleri ve alınan kararları özetler. Yeni bir çalışmaya başlamadan önce bu dosyayı ve architecture.md dosyasını kontrol et, işlem sonrası güncelle.
 
+## Sürüm 2.1 (Temmuz 2026): Güç metrikleri ve satır gizleme
+
+- **SMC güç anahtarları eklendi:** sistem toplam gücü PSTR, CPU paket gücü PHPC, DC giriş gücü PDTR (bulunamazsa PD0R yedeği) anahtarlarından okunuyor. Sıcaklık anahtarları gibi aday listesinden açılışta bir kez probe ediliyor, sonuç powerKeyAvailable ile UserDefaults'a önbellekleniyor. M4 Mac mini üzerinde probe ile doğrulandı.
+- **Widget güç satırı** eklendi: ana ızgaranın altına watt cinsinden anlık sistem gücü satırı geldi. Okunabilir anahtar yoksa (systemPowerW 0 veya altındaysa) satır tamamen gizleniyor, sahte değer gösterilmiyor.
+- **Menüye Power satırı** eklendi: menü açıkken canlı güncelleniyor, okunabilir anahtar yoksa menü öğesi de gizleniyor.
+- **Widget Rows alt menüsü** eklendi: Power, Network Speed ve IP Addresses satırları artık menüden birbirinden bağımsız açılıp kapanabiliyor (widgetRow_power/network/ip, hepsi varsayılan açık, UserDefaults.register ile kayıtlı, güncellemelerde de açık kalıyor).
+- **Dinamik pencere yüksekliği artık formülle hesaplanıyor:** UILayout.mainHeight(hasBattery:showPower:showNetwork:showIP:) sabit ızgara yüksekliğine yalnızca o an görünen satırların (güç, ağ, IP, batarya) yüksekliklerini ekliyor. Bir satır gizlense veya batarya olmasa bile pencere her zaman doğru boyutta açılıyor, önceki sabit yükseklik varsayımı kalktı.
+- **Thermals'a Güç bölümü** eklendi: sistem, CPU ve DC giriş güç değerleri (watt) ile HistoryStore.power'dan beslenen bir geçmiş grafiği (min/max) gösteriliyor.
+- **RAM detayına swap ve bellek basıncı** eklendi: vm.swapusage ile kullanılan/toplam swap, kern.memorystatus_vm_pressure_level ile basınç seviyesi (Normal/Warning/Critical) gösteriliyor. Swap sysctl'i okunamazsa satır tamamen gizleniyor.
+- **Disk detayına anlık okuma/yazma hızı** eklendi: IOBlockStorageDriver'ın Statistics sözlüğünden alınan bayt sayaçlarının tikler arası farkından hesaplanıyor. Önemli düzeltme: gerçek yazma anahtarı "Bytes (Write)"; planda "Bytes (Written)" olarak geçiyordu ama bu anahtar SMC/IOKit tarafında yok, gerçek anahtar probe ile doğrulanıp koda öyle yazıldı. İlk delta örneği alınana kadar satır gizli kalıyor.
+- **Genel kural:** güç, swap ve disk I/O satırlarının hepsi veri kaynağı okunamadığında sıfır veya sahte değer göstermek yerine tamamen gizleniyor; bu, projenin dürüst arayüz ilkesiyle tutarlı.
+
 ## Sürüm 2.0.1 Düzeltmeleri (Temmuz 2026, kullanıcı geri bildirimi)
 
 - **Fan boost M4'te çalışmıyordu.** Kök neden: modern Apple Silicon'da (M4 dahil) "FS! " force-bits anahtarı yok; SMC probe ile doğrulandı (F0Md ui8 mevcut, FS! missing). FanHelper artık mimariden tahmin etmek yerine anahtar introspeksiyonu yapıyor: manuel mod F*Md üzerinden (yoksa FS! fallback), hedef RPM anahtarın bildirdiği kodlamayla (flt veya fpe2) yazılıyor. SMC yazmayı reddederse helper hata koduyla çıkıyor.
