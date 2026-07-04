@@ -92,6 +92,9 @@ class SystemMonitor: ObservableObject {
     @Published var diskUsed: Double = 0   // GB
     @Published var diskFree: Double = 0   // GB
     @Published var cpuTemp: Double = 0
+    @Published var systemPowerW: Double = 0   // watts, 0 = no readable power key
+    @Published var cpuPowerW: Double = 0      // CPU package watts (Thermals breakdown)
+    @Published var dcInPowerW: Double = 0     // DC input watts (Thermals breakdown)
     @Published var topRAMProcesses: [ProcessEntry] = []
     @Published var topCPUProcesses: [ProcessEntry] = []
     @Published var purgeJustCompleted: Bool = false
@@ -227,6 +230,7 @@ class SystemMonitor: ObservableObject {
             let disk = diskToo ? self.getDisk() : nil
             let temp = self.getTemp()
             let fanData = self.getFans()
+            let power = self.getPower()
 
             self.publishOnMain {
                 // Only update published properties when values actually changed
@@ -251,6 +255,13 @@ class SystemMonitor: ObservableObject {
                 let roundedTemp = temp.rounded()
                 if self.cpuTemp != roundedTemp { self.cpuTemp = roundedTemp }
 
+                let roundedPower = (power.system * 10).rounded() / 10
+                if self.systemPowerW != roundedPower { self.systemPowerW = roundedPower }
+                let roundedCPUPower = (power.cpu * 10).rounded() / 10
+                if self.cpuPowerW != roundedCPUPower { self.cpuPowerW = roundedCPUPower }
+                let roundedDCIn = (power.dcIn * 10).rounded() / 10
+                if self.dcInPowerW != roundedDCIn { self.dcInPowerW = roundedDCIn }
+
                 // Update fan data only when it actually changed
                 if self.fans != fanData { self.fans = fanData }
 
@@ -263,7 +274,8 @@ class SystemMonitor: ObservableObject {
                     cpu: roundedCPU,
                     ram: roundedUsed,
                     temp: roundedTemp,
-                    fans: fanData.map { $0.actualRPM }
+                    fans: fanData.map { $0.actualRPM },
+                    power: roundedPower
                 )
 
                 self.checkThresholds()
@@ -961,6 +973,41 @@ class SystemMonitor: ObservableObject {
             smoothedTemp = smoothedTemp * 0.6 + avg * 0.4
         }
         return smoothedTemp
+    }
+
+    // MARK: - Power (SMC)
+    // Candidate keys per slot, discovered once at launch like temperature
+    // keys. Verified by SMC probe on an M4 Mac mini: PSTR (system total),
+    // PHPC (CPU package), PDTR and PD0R (DC input). Missing keys simply
+    // leave their published value at 0 and the UI hides the row.
+    private static let systemPowerCandidates = ["PSTR"]
+    private static let cpuPowerCandidates = ["PHPC"]
+    private static let dcInPowerCandidates = ["PDTR", "PD0R"]
+    private var powerKeysProbed = false
+    private var systemPowerKey: String?
+    private var cpuPowerKey: String?
+    private var dcInPowerKey: String?
+
+    // Power-specific SMC read with plausibility validation
+    private func readSMCPower(_ key: String) -> Double? {
+        guard let val = readSMCValue(key) else { return nil }
+        return (val >= 0 && val < 1000) ? val : nil
+    }
+
+    private func getPower() -> (system: Double, cpu: Double, dcIn: Double) {
+        if !powerKeysProbed {
+            powerKeysProbed = true
+            systemPowerKey = Self.systemPowerCandidates.first { readSMCPower($0) != nil }
+            cpuPowerKey = Self.cpuPowerCandidates.first { readSMCPower($0) != nil }
+            dcInPowerKey = Self.dcInPowerCandidates.first { readSMCPower($0) != nil }
+            // Cache availability so the next launch can size the window
+            // correctly before the first async tick publishes a value.
+            UserDefaults.standard.set(systemPowerKey != nil, forKey: "powerKeyAvailable")
+        }
+        let system = systemPowerKey.flatMap { readSMCPower($0) } ?? 0
+        let cpu = cpuPowerKey.flatMap { readSMCPower($0) } ?? 0
+        let dcIn = dcInPowerKey.flatMap { readSMCPower($0) } ?? 0
+        return (system, cpu, dcIn)
     }
 
     // MARK: - Fan Reading

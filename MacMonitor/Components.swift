@@ -89,11 +89,13 @@ final class HistoryStore: ObservableObject {
     @Published private(set) var ram: [Double] = []
     @Published private(set) var temp: [Double] = []
     @Published private(set) var fanRPM: [[Double]] = []
+    @Published private(set) var power: [Double] = []
 
-    func append(cpu: Double, ram: Double, temp: Double, fans: [Double]) {
+    func append(cpu: Double, ram: Double, temp: Double, fans: [Double], power: Double) {
         appendValue(&self.cpu, cpu)
         appendValue(&self.ram, ram)
         if temp > 0 { appendValue(&self.temp, temp) }
+        if power > 0 { appendValue(&self.power, power) }
         if !fans.isEmpty {
             if fanRPM.count != fans.count { fanRPM = fans.map { _ in [] } }
             for (i, rpm) in fans.enumerated() {
