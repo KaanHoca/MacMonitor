@@ -26,6 +26,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var gpuMenuItem: NSMenuItem!
     private var uptimeMenuItem: NSMenuItem!
     private var loadMenuItem: NSMenuItem!
+    private var powerMenuItem: NSMenuItem!
+    private var widgetRowPowerItem: NSMenuItem!
+    private var widgetRowNetworkItem: NSMenuItem!
+    private var widgetRowIPItem: NSMenuItem!
     private var menuUpdateTimer: Timer?
     private var launchAtLoginItem: NSMenuItem!
     private var alertsMenuItem: NSMenuItem!
@@ -248,6 +252,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         diskMenuItem = makeStatsItem("internaldrive", "Disk", "—")
         tempMenuItem = makeStatsItem("thermometer.medium", "Temp", "—")
         fanMenuItem = makeStatsItem("fan.fill", "Fan", "—")
+        powerMenuItem = makeStatsItem("bolt.fill", "Power", "—")
         gpuMenuItem = makeStatsItem("display", "GPU", "—")
         uptimeMenuItem = makeStatsItem("clock", "Uptime", "—")
         loadMenuItem = makeStatsItem("chart.bar", "Load", "—")
@@ -257,6 +262,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(diskMenuItem)
         menu.addItem(tempMenuItem)
         menu.addItem(fanMenuItem)
+        menu.addItem(powerMenuItem)
         menu.addItem(gpuMenuItem)
         menu.addItem(uptimeMenuItem)
         menu.addItem(loadMenuItem)
@@ -277,6 +283,20 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         themeItem.submenu = themeMenu
         menu.addItem(themeItem)
+
+        // Widget Rows submenu: shows or hides individual widget info rows
+        let widgetRowsItem = NSMenuItem(title: "Widget Rows", action: nil, keyEquivalent: "")
+        widgetRowsItem.image = NSImage(systemSymbolName: "rectangle.grid.1x2", accessibilityDescription: "Widget Rows")
+        widgetRowsItem.image?.size = NSSize(width: 14, height: 14)
+        let rowsMenu = NSMenu()
+        widgetRowPowerItem = makeWidgetRowItem("Power", key: "widgetRow_power")
+        widgetRowNetworkItem = makeWidgetRowItem("Network Speed", key: "widgetRow_network")
+        widgetRowIPItem = makeWidgetRowItem("IP Addresses", key: "widgetRow_ip")
+        rowsMenu.addItem(widgetRowPowerItem)
+        rowsMenu.addItem(widgetRowNetworkItem)
+        rowsMenu.addItem(widgetRowIPItem)
+        widgetRowsItem.submenu = rowsMenu
+        menu.addItem(widgetRowsItem)
 
         menu.addItem(NSMenuItem.separator())
 
@@ -323,6 +343,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return item
     }
 
+    private func makeWidgetRowItem(_ title: String, key: String) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: #selector(toggleWidgetRow(_:)), keyEquivalent: "")
+        item.target = self
+        item.representedObject = key
+        item.state = UserDefaults.standard.bool(forKey: key) ? .on : .off
+        return item
+    }
+
     private func updateMenuStats() {
         let cpu = String(format: "%.0f%%", monitor.cpuUsage)
         let ram = String(format: "%.1f / %.0f GB", monitor.usedRAM, monitor.totalRAM)
@@ -346,6 +374,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
             fanMenuItem.title = "Fan:  \(fanText)"
         }
+
+        if monitor.systemPowerW > 0 {
+            powerMenuItem.isHidden = false
+            powerMenuItem.title = String(format: "Power:  %.1f W", monitor.systemPowerW)
+        } else {
+            powerMenuItem.isHidden = true
+        }
+        // No power data means the toggle would be a no-op; hide it too
+        widgetRowPowerItem.isHidden = monitor.systemPowerW <= 0
 
         if let gpu = monitor.readGPUUsage() {
             gpuMenuItem.isHidden = false
@@ -381,6 +418,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func toggleAlerts() {
         monitor.alertsEnabled.toggle()
         alertsMenuItem.state = monitor.alertsEnabled ? .on : .off
+    }
+
+    @objc private func toggleWidgetRow(_ sender: NSMenuItem) {
+        guard let key = sender.representedObject as? String else { return }
+        let newValue = !UserDefaults.standard.bool(forKey: key)
+        UserDefaults.standard.set(newValue, forKey: key)
+        sender.state = newValue ? .on : .off
     }
 
     @objc private func toggleKeepAwake() {
