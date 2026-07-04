@@ -74,7 +74,9 @@ struct ContentView: View {
                     matchID: "ring-disk",
                     ns: ringNS,
                     onBack: { closeDetail() },
-                    onCleanComplete: { monitor.refreshDisk() }
+                    onCleanComplete: { monitor.refreshDisk() },
+                    readMBs: monitor.diskReadMBs,
+                    writeMBs: monitor.diskWriteMBs
                 )
                 .transition(.opacity)
             case .fan:
@@ -1213,6 +1215,8 @@ struct DiskCleanupView: View {
     let ns: Namespace.ID
     let onBack: () -> Void
     var onCleanComplete: (() -> Void)? = nil
+    var readMBs: Double = -1
+    var writeMBs: Double = -1
 
     @State private var showResetConfirm = false
 
@@ -1228,6 +1232,31 @@ struct DiskCleanupView: View {
         VStack(alignment: .leading, spacing: 0) {
             // Header
             diskCleanupHeader
+
+            // Live disk throughput; hidden until the first delta sample
+            if readMBs >= 0 || writeMBs >= 0 {
+                HStack(spacing: 12) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.down.doc")
+                            .font(.system(size: 10))
+                            .foregroundStyle(accent.opacity(0.6))
+                        Text(String(format: "R %.1f MB/s", max(readMBs, 0)))
+                            .font(.system(size: 10, weight: .semibold, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.65))
+                    }
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.up.doc")
+                            .font(.system(size: 10))
+                            .foregroundStyle(accent.opacity(0.6))
+                        Text(String(format: "W %.1f MB/s", max(writeMBs, 0)))
+                            .font(.system(size: 10, weight: .semibold, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.65))
+                    }
+                    Spacer()
+                }
+                .padding(.leading, 2)
+                .padding(.bottom, 8)
+            }
 
             if cleaner.isScanning || cleaner.isCleaning {
                 // Progress state

@@ -98,6 +98,8 @@ class SystemMonitor: ObservableObject {
     @Published var swapUsedGB: Double = 0
     @Published var swapTotalGB: Double = -1   // -1 = sysctl unavailable, hide row
     @Published var memoryPressureLevel: Int = 0  // 0 unknown, 1 normal, 2 warning, 4 critical
+    @Published var diskReadMBs: Double = -1   // -1 = no sample yet, hide row
+    @Published var diskWriteMBs: Double = -1
     @Published var topRAMProcesses: [ProcessEntry] = []
     @Published var topCPUProcesses: [ProcessEntry] = []
     @Published var purgeJustCompleted: Bool = false
@@ -146,6 +148,9 @@ class SystemMonitor: ObservableObject {
     private var prevBytesIn: UInt64 = 0
     private var prevBytesOut: UInt64 = 0
     private var lastNetworkTime: Date?
+    private var prevDiskRead: UInt64 = 0
+    private var prevDiskWrite: UInt64 = 0
+    private var lastDiskIOTime: Date?
 
     // Cached SMC key info — dataSize and dataType per key, queried once
     private var smcKeyInfoCache: [UInt32: (dataSize: UInt32, dataType: UInt32)] = [:]
@@ -236,6 +241,7 @@ class SystemMonitor: ObservableObject {
             let power = self.getPower()
             let swap = self.getSwap()
             let pressure = self.getMemoryPressureLevel()
+            self.updateDiskIO()
 
             self.publishOnMain {
                 // Only update published properties when values actually changed
@@ -613,6 +619,59 @@ class SystemMonitor: ObservableObject {
         prevBytesIn = bytes.bytesIn
         prevBytesOut = bytes.bytesOut
         lastNetworkTime = now
+    }
+
+    // MARK: - Disk I/O Speed
+    private func getDiskIOBytes() -> (read: UInt64, write: UInt64)? {
+        var iter = io_iterator_t()
+        guard IOServiceGetMatchingServices(kIOMainPortDefault,
+                                           IOServiceMatching("IOBlockStorageDriver"),
+                                           &iter) == kIOReturnSuccess else { return nil }
+        defer { IOObjectRelease(iter) }
+
+        var totalRead: UInt64 = 0
+        var totalWrite: UInt64 = 0
+        var found = false
+        while case let drive = IOIteratorNext(iter), drive != 0 {
+            var props: Unmanaged<CFMutableDictionary>?
+            if IORegistryEntryCreateCFProperties(drive, &props, kCFAllocatorDefault, 0) == kIOReturnSuccess,
+               let dict = props?.takeRetainedValue() as? [String: Any],
+               let stats = dict["Statistics"] as? [String: Any] {
+                if let read = (stats["Bytes (Read)"] as? NSNumber)?.uint64Value {
+                    totalRead += read
+                    found = true
+                }
+                if let write = (stats["Bytes (Write)"] as? NSNumber)?.uint64Value {
+                    totalWrite += write
+                    found = true
+                }
+            }
+            IOObjectRelease(drive)
+        }
+        return found ? (totalRead, totalWrite) : nil
+    }
+
+    private func updateDiskIO() {
+        let now = Date()
+        guard let bytes = getDiskIOBytes() else { return }
+        if let last = lastDiskIOTime {
+            let elapsed = now.timeIntervalSince(last)
+            // Skip the tick when counters went backwards (drive ejected or
+            // counters reset); the next tick recovers with fresh baselines.
+            if elapsed > 0, bytes.read >= prevDiskRead, bytes.write >= prevDiskWrite {
+                let readMBs = Double(bytes.read - prevDiskRead) / elapsed / (1024 * 1024)
+                let writeMBs = Double(bytes.write - prevDiskWrite) / elapsed / (1024 * 1024)
+                publishOnMain {
+                    let r = (readMBs * 10).rounded() / 10
+                    let w = (writeMBs * 10).rounded() / 10
+                    if self.diskReadMBs != r { self.diskReadMBs = r }
+                    if self.diskWriteMBs != w { self.diskWriteMBs = w }
+                }
+            }
+        }
+        prevDiskRead = bytes.read
+        prevDiskWrite = bytes.write
+        lastDiskIOTime = now
     }
 
     // MARK: - Ping
