@@ -973,7 +973,7 @@ In `MacMonitor/MacMonitorApp.swift`:
 2. Replace everything from `        // NSVisualEffectView — native macOS widget material` through the `NSLayoutConstraint.activate([...])` block that pins `hosting` to `visualEffect`, and the following `window.contentView = visualEffect` line, with:
 
 ```swift
-        // SwiftUI content — share the same monitor instance
+        // SwiftUI content, sharing the same monitor instance
         let hosting = NSHostingView(rootView: WidgetRoot(monitor: monitor, appearance: widgetAppearance))
         // AppDelegate owns the window size (fixed widget grid sizes); without
         // this the SwiftUI content's ideal size silently overrides it.
