@@ -1,7 +1,7 @@
 # Widget Appearance: Light, Dark and Glass States
 
 Date: 2026-09-13
-Status: Draft, awaiting user review
+Status: Approved
 
 ## Goal
 
@@ -88,9 +88,12 @@ click-through).
    - Finder's desktop (desktop icon level) or the wallpaper (Dock and Window
      Server desktop levels): full-color.
    - A normal app window (layer 0 up to below 18): dimmed.
-   - MacMonitor, a native widget, the menu bar or a menu: unchanged.
-   - Anything else (for example a Dock layer 18 window): 0.7s later, dimmed
-     if a normal window is visible on D, otherwise unchanged.
+   - A Dock window at layer 18 (seen only while the desktop is revealed):
+     0.7s later, dimmed if a normal window is visible on D, otherwise
+     unchanged.
+   - MacMonitor, a native widget, the Dock bar, the menu bar, a menu or any
+     other system window: unchanged. Dock clicks that open or switch apps
+     are covered by rule 2.
 
    Clicks on other displays leave the state unchanged.
 2. **App activation** (`NSWorkspace.didActivateApplicationNotification`): 0.7s
