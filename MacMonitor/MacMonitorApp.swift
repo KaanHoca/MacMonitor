@@ -90,8 +90,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         visualEffect.state = .active
         visualEffect.appearance = NSAppearance(named: .darkAqua)
 
-        // Rounded corners via maskImage — no border artifacts
-        visualEffect.maskImage = roundedMask(cornerRadius: 18)
+        // Native continuous corners via maskImage (no border artifacts)
+        visualEffect.maskImage = WidgetChrome.cornerMask()
 
         // SwiftUI content — share the same monitor instance
         let hosting = NSHostingView(rootView: ContentView(monitor: monitor))
@@ -389,22 +389,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             else { return nil }
             return WindowSnapper.cocoaRect(fromCG: bounds, primaryScreenHeight: primaryHeight)
         }
-    }
-
-    /// Creates a stretchable mask image for NSVisualEffectView — clean rounded corners
-    private func roundedMask(cornerRadius: CGFloat) -> NSImage {
-        let edge = 2.0 * cornerRadius + 1.0
-        let size = NSSize(width: edge, height: edge)
-        let image = NSImage(size: size, flipped: false) { rect in
-            NSBezierPath(roundedRect: rect, xRadius: cornerRadius, yRadius: cornerRadius).fill()
-            return true
-        }
-        image.capInsets = NSEdgeInsets(
-            top: cornerRadius, left: cornerRadius,
-            bottom: cornerRadius, right: cornerRadius
-        )
-        image.resizingMode = .stretch
-        return image
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {

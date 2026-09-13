@@ -32,6 +32,7 @@ swiftc \
   MacMonitor/DiskCleaner.swift \
   MacMonitor/Components.swift \
   MacMonitor/WindowSnapper.swift \
+  MacMonitor/WidgetChrome.swift \
   MacMonitor/ContentView.swift \
   MacMonitor/MacMonitorApp.swift
 
