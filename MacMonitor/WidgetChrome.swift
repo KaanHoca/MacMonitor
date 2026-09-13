@@ -73,14 +73,16 @@ final class WidgetBackgroundView: NSView {
     /// Dimmed native widgets blur the wallpaper with a sigma of about 6pt;
     /// radius 4, 8, 12 and 16 measured sigma 1.8, 2.7, 3.7 and 4.7pt.
     static let glassBlurRadius = 20
-    /// Tints over the blurred wallpaper. In Dark, native dimmed widgets show
-    /// about 0.33 of the wallpaper plus (13, 20, 27), which a 67% tint of
-    /// (19, 30, 40) reproduces. The Light tint is an estimate from a single
-    /// brightness sample (0.39 over a dark wallpaper) until measured.
+    /// Tints over the blurred wallpaper, fitted against the bare wallpaper.
+    /// In Dark, native dimmed widgets show about 0.33 of the wallpaper plus
+    /// (13, 20, 27); in Light about 0.46 plus (64, 69, 75). These tints
+    /// reproduce both within 2 levels per channel.
     static let darkGlassTint = NSColor(srgbRed: 16 / 255, green: 23 / 255, blue: 31 / 255, alpha: 0.67)
-    static let lightGlassTint = NSColor(srgbRed: 128 / 255, green: 132 / 255, blue: 140 / 255, alpha: 0.6)
-    /// The 1pt rim of dimmed native widgets stands about 100 above the interior.
-    static let glassRimColor = NSColor(white: 1, alpha: 0.42)
+    static let lightGlassTint = NSColor(srgbRed: 106 / 255, green: 109 / 255, blue: 123 / 255, alpha: 0.48)
+    /// The 1pt rim of dimmed native widgets stands about 100 above the
+    /// interior in Dark and about 55 in Light.
+    static let darkGlassRimColor = NSColor(white: 1, alpha: 0.42)
+    static let lightGlassRimColor = NSColor(white: 1, alpha: 0.29)
     /// Fallback only: dims NSGlassEffectView in Dark. Measured against the
     /// bare wallpaper, a navy shade at 52% matched native widgets within 3
     /// levels per channel; tinting the glass itself only lightened it.
@@ -109,7 +111,6 @@ final class WidgetBackgroundView: NSView {
         rimView.wantsLayer = true
         rim.fillColor = nil
         rim.lineWidth = 1
-        rim.strokeColor = Self.glassRimColor.cgColor
         rimView.layer?.addSublayer(rim)
 
         material.material = .hudWindow
@@ -178,6 +179,7 @@ final class WidgetBackgroundView: NSView {
         let fallbackGlass = glassOn && glass != nil
         let fallbackMaterial = glassOn && !customGlass && glass == nil
         shade.layer?.backgroundColor = (blurGlass ? (dark ? Self.darkGlassTint : Self.lightGlassTint) : Self.darkGlassShade).cgColor
+        rim.strokeColor = (dark ? Self.darkGlassRimColor : Self.lightGlassRimColor).cgColor
         let targets: [(NSView?, Bool)] = [
             (surface, style == .fullColor),
             (material, fallbackMaterial),
