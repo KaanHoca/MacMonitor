@@ -17,3 +17,4 @@ run_suite() {
 
 run_suite WindowSnapperTests MacMonitor/WindowSnapper.swift Tests/WindowSnapperTests.swift
 run_suite WidgetChromeTests MacMonitor/WidgetChrome.swift Tests/WidgetChromeTests.swift
+run_suite DesktopFocusRuleTests MacMonitor/DesktopFocusRule.swift Tests/DesktopFocusRuleTests.swift

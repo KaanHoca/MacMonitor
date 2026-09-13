@@ -33,6 +33,7 @@ swiftc \
   MacMonitor/Components.swift \
   MacMonitor/WindowSnapper.swift \
   MacMonitor/WidgetChrome.swift \
+  MacMonitor/DesktopFocusRule.swift \
   MacMonitor/ContentView.swift \
   MacMonitor/MacMonitorApp.swift
 
