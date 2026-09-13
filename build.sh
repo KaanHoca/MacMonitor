@@ -25,6 +25,7 @@ swiftc \
   MacMonitor/WindowSnapper.swift \
   MacMonitor/WidgetChrome.swift \
   MacMonitor/DesktopFocusRule.swift \
+  MacMonitor/WidgetAppearance.swift \
   MacMonitor/ContentView.swift \
   MacMonitor/MacMonitorApp.swift
 

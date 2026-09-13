@@ -43,6 +43,7 @@ struct TickGauge: View, Animatable {
     var warnAt: Double? = nil
     var critAt: Double? = nil
     var highlight: Bool = false
+    @Environment(\.widgetGlass) private var glass
 
     var animatableData: Double {
         get { percent }
@@ -59,11 +60,17 @@ struct TickGauge: View, Animatable {
             let lineWidth = max(outer * 0.055, 1.1)
             let lit = clamped * Double(tickCount)
 
+            let pastWarn = warnAt.map { clamped >= $0 } ?? false
+            let pastCrit = critAt.map { clamped >= $0 } ?? false
             let activeColor: Color = {
-                if let crit = critAt, clamped >= crit { return Color(red: 0.90, green: 0.30, blue: 0.30) }
-                if let warn = warnAt, clamped >= warn { return Color(red: 0.95, green: 0.65, blue: 0.30) }
+                if glass { return .white }
+                if pastCrit { return Color(red: 0.90, green: 0.30, blue: 0.30) }
+                if pastWarn { return Color(red: 0.95, green: 0.65, blue: 0.30) }
                 return color
             }()
+            // Glass is monochrome like dimmed native widgets; warning and
+            // critical ticks stay distinguishable by burning brighter.
+            let peak = glass && !pastWarn && !pastCrit ? 0.7 : 1.0
 
             for i in 0..<tickCount {
                 let angle = Double(i) / Double(tickCount) * 2 * .pi - .pi / 2
@@ -79,7 +86,7 @@ struct TickGauge: View, Animatable {
                 if fill > 0 {
                     let positionInArc = (Double(i) + 0.5) / max(lit, 0.001)
                     let ramp = 0.55 + 0.45 * min(positionInArc, 1)
-                    tickColor = activeColor.opacity(ramp * fill + 0.09 * (1 - fill))
+                    tickColor = activeColor.opacity(peak * ramp * fill + 0.09 * (1 - fill))
                 } else {
                     tickColor = Color.primary.opacity(highlight ? 0.16 : 0.09)
                 }

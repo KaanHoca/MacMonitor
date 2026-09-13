@@ -16,6 +16,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var window: NSWindow!
     var statusItem: NSStatusItem?
     let monitor = SystemMonitor()
+    let widgetAppearance = WidgetAppearance()
+    private var background: WidgetBackgroundView!
 
     // Menu items for live stats
     private var cpuMenuItem: NSMenuItem!
@@ -113,32 +115,18 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // Content goes in last: moving the window onto another display draws
         // it right away, and SwiftUI content attached earlier would appear and
         // post its first resize request before the observer above exists.
-        let visualEffect = NSVisualEffectView(frame: NSRect(origin: .zero, size: size))
-        visualEffect.material = .hudWindow
-        visualEffect.blendingMode = .behindWindow
-        visualEffect.state = .active
-        visualEffect.appearance = NSAppearance(named: .darkAqua)
-
-        // Native continuous corners via maskImage (no border artifacts)
-        visualEffect.maskImage = WidgetChrome.cornerMask()
-
         // SwiftUI content, sharing the same monitor instance
-        let hosting = NSHostingView(rootView: ContentView(monitor: monitor))
+        let hosting = NSHostingView(rootView: WidgetRoot(monitor: monitor, appearance: widgetAppearance))
         // AppDelegate owns the window size (fixed widget grid sizes); without
         // this the SwiftUI content's ideal size silently overrides it.
         hosting.sizingOptions = []
-        hosting.translatesAutoresizingMaskIntoConstraints = false
         hosting.wantsLayer = true
         hosting.layer?.backgroundColor = .clear
 
-        visualEffect.addSubview(hosting)
-        NSLayoutConstraint.activate([
-            hosting.topAnchor.constraint(equalTo: visualEffect.topAnchor),
-            hosting.bottomAnchor.constraint(equalTo: visualEffect.bottomAnchor),
-            hosting.leadingAnchor.constraint(equalTo: visualEffect.leadingAnchor),
-            hosting.trailingAnchor.constraint(equalTo: visualEffect.trailingAnchor),
-        ])
-        window.contentView = visualEffect
+        background = WidgetBackgroundView(content: hosting)
+        window.contentView = background
+        widgetAppearance.onChange = { [weak self] in self?.applyWidgetAppearance(animated: true) }
+        applyWidgetAppearance(animated: false)
 
         window.orderFrontRegardless()
     }
@@ -207,6 +195,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         isProgrammaticResize = true
         window.setFrame(frame, display: true)
         isProgrammaticResize = false
+    }
+
+    /// Pushes the resolved render state to the window: the NSAppearance
+    /// drives SwiftUI's color scheme and the background swaps layers.
+    private func applyWidgetAppearance(animated: Bool) {
+        window.appearance = widgetAppearance.windowAppearance
+        background.setStyle(widgetAppearance.isGlass ? .glass : .fullColor, animated: animated)
     }
 
     // MARK: - Window Placement
@@ -442,20 +437,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         menu.addItem(NSMenuItem.separator())
 
-        // Theme submenu
-        let themeItem = NSMenuItem(title: "Theme", action: nil, keyEquivalent: "")
-        themeItem.image = NSImage(systemSymbolName: "paintpalette", accessibilityDescription: "Theme")
-        themeItem.image?.size = NSSize(width: 14, height: 14)
-        let themeMenu = NSMenu()
-        for theme in AppTheme.allCases {
-            let item = NSMenuItem(title: theme.rawValue, action: #selector(themeSelected(_:)), keyEquivalent: "")
-            item.representedObject = theme.rawValue
-            item.target = self
-            if theme == monitor.theme { item.state = .on }
-            themeMenu.addItem(item)
-        }
-        themeItem.submenu = themeMenu
-        menu.addItem(themeItem)
+        menu.addItem(makeChoiceMenu(
+            title: "Theme", symbol: "paintpalette",
+            choices: AppTheme.allCases.map { ($0.rawValue, $0.rawValue) },
+            selected: monitor.theme.rawValue, action: #selector(themeSelected(_:))
+        ))
 
         // Widget Rows submenu: shows or hides individual widget info rows
         let widgetRowsItem = NSMenuItem(title: "Widget Rows", action: nil, keyEquivalent: "")
@@ -470,6 +456,17 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         rowsMenu.addItem(widgetRowIPItem)
         widgetRowsItem.submenu = rowsMenu
         menu.addItem(widgetRowsItem)
+
+        menu.addItem(makeChoiceMenu(
+            title: "Appearance", symbol: "circle.lefthalf.filled",
+            choices: AppearanceMode.allCases.map { ($0.title, $0.rawValue) },
+            selected: widgetAppearance.appearanceMode.rawValue, action: #selector(appearanceSelected(_:))
+        ))
+        menu.addItem(makeChoiceMenu(
+            title: "Widget Style", symbol: "rectangle.on.rectangle",
+            choices: WidgetStyleMode.allCases.map { ($0.title, $0.rawValue) },
+            selected: widgetAppearance.styleMode.rawValue, action: #selector(widgetStyleSelected(_:))
+        ))
 
         // Lock Position: turns off dragging so the widget cannot be moved by accident
         lockPositionItem = NSMenuItem(title: "Lock Position", action: #selector(toggleLockPosition), keyEquivalent: "")
@@ -520,6 +517,32 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         item.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: label)
         item.image?.size = NSSize(width: 14, height: 14)
         return item
+    }
+
+    /// Submenu with one checkmarked choice; items carry the raw value.
+    private func makeChoiceMenu(
+        title: String, symbol: String, choices: [(title: String, value: String)],
+        selected: String, action: Selector
+    ) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: title)
+        item.image?.size = NSSize(width: 14, height: 14)
+        let submenu = NSMenu()
+        for choice in choices {
+            let entry = NSMenuItem(title: choice.title, action: action, keyEquivalent: "")
+            entry.target = self
+            entry.representedObject = choice.value
+            entry.state = choice.value == selected ? .on : .off
+            submenu.addItem(entry)
+        }
+        item.submenu = submenu
+        return item
+    }
+
+    private func markSelected(_ sender: NSMenuItem) {
+        for item in sender.menu?.items ?? [] {
+            item.state = item === sender ? .on : .off
+        }
     }
 
     private func makeWidgetRowItem(_ title: String, key: String) -> NSMenuItem {
@@ -682,12 +705,21 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard let rawValue = sender.representedObject as? String,
               let theme = AppTheme(rawValue: rawValue) else { return }
         monitor.theme = theme
-        // Update checkmarks
-        if let themeMenu = sender.menu {
-            for item in themeMenu.items {
-                item.state = (item.representedObject as? String) == rawValue ? .on : .off
-            }
-        }
+        markSelected(sender)
+    }
+
+    @objc private func appearanceSelected(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String,
+              let mode = AppearanceMode(rawValue: raw) else { return }
+        widgetAppearance.appearanceMode = mode
+        markSelected(sender)
+    }
+
+    @objc private func widgetStyleSelected(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String,
+              let mode = WidgetStyleMode(rawValue: raw) else { return }
+        widgetAppearance.styleMode = mode
+        markSelected(sender)
     }
 
     // MARK: - Launch at Login

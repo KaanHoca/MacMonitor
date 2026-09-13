@@ -452,6 +452,9 @@ struct ContentView: View {
     }
 
     func processBarColor(_ value: Double, thresholds: (Double, Double)) -> Color {
+        // Glass is monochrome white (desaturated red would turn into gray
+        // that vanishes on the glass); heavy processes stay brighter instead.
+        if widgetGlass { return Color.white.opacity(value >= thresholds.0 ? 1 : 0.75) }
         if value >= thresholds.1 { return Color(red: 0.9, green: 0.3, blue: 0.3) }
         if value >= thresholds.0 { return Color(red: 0.95, green: 0.65, blue: 0.3) }
         return tc.accent
@@ -477,6 +480,7 @@ struct ContentView: View {
     }
 
     private var pressureColor: Color {
+        if widgetGlass { return .white }
         switch monitor.memoryPressureLevel {
         case 1: return .green
         case 2: return .orange
@@ -493,6 +497,7 @@ struct ContentView: View {
     }
 
     func pingColor(_ ms: Double) -> Color {
+        if widgetGlass { return .white }
         if ms < 0 { return .gray }
         if ms < 50 { return .green }
         if ms < 100 { return .yellow }
@@ -1600,5 +1605,21 @@ struct CleanupToggleStyle: ToggleStyle {
                     configuration.isOn.toggle()
                 }
         }
+    }
+}
+
+// MARK: - Widget Root
+
+/// Root of the widget: publishes the render state to the view tree and
+/// desaturates everything in Glass, where native widgets are monochrome.
+struct WidgetRoot: View {
+    @ObservedObject var monitor: SystemMonitor
+    @ObservedObject var appearance: WidgetAppearance
+
+    var body: some View {
+        ContentView(monitor: monitor)
+            .environment(\.widgetGlass, appearance.isGlass)
+            .saturation(appearance.isGlass ? 0 : 1)
+            .shadow(color: .black.opacity(appearance.isGlass ? 0.45 : 0), radius: 1.5, y: 0.5)
     }
 }
