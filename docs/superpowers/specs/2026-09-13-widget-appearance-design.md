@@ -1,7 +1,7 @@
 # Widget Appearance: Light, Dark and Glass States
 
 Date: 2026-09-13
-Status: Approved
+Status: Implemented (see Implementation Notes for decisions that changed)
 
 ## Goal
 
@@ -158,6 +158,16 @@ prompt.
   switch together with the native widgets.
 - **Resources**: CPU and memory sampled before and after, as in the previous
   release; no new timers.
+
+## Implementation Notes
+
+Decisions that changed while matching the native widgets on screen:
+
+- **Full-color Dark** uses an opaque neutral surface (sRGB 47, which reads 61 in captures like the native widgets) instead of the dark HUD material, which looked bluish and translucent next to them.
+- **Glass follows the window appearance** instead of always rendering dark: light glass in Light matched dimmed native widgets (0.40 vs 0.39). Only the content is forced to the dark scheme so its text stays white. In Dark a 45% black shade over the glass matches them (26 to 30 vs 24 to 27); tinting the glass itself only lightened it.
+- **Glass content**: status and process colors turn white (heavy values brighter), because desaturated red became gray that vanished on light glass; a soft shadow keeps text legible over bright wallpaper.
+- **Rule 1** re-checks only for Dock layer 18 windows; the Dock bar and other system windows leave the state unchanged, and Dock clicks that switch apps are covered by rule 2.
+- **Launch order**: the SwiftUI content is attached after the window is placed and the observers are registered (a detail view opened at launch on a secondary display otherwise stayed at grid height).
 
 ## Out of Scope
 

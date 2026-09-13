@@ -14,6 +14,9 @@ MacMonitor/
 │   ├── Components.swift      # Shared UI: TickGauge, HistoryGraph,
 │   │                         # DetailHeader, HistoryStore, UILayout constants
 │   ├── WindowSnapper.swift   # Desktop widget grid geometry (pure CoreGraphics)
+│   ├── WidgetChrome.swift    # Native corner mask and the per-state background view
+│   ├── DesktopFocusRule.swift # When native widgets are full-color or dimmed (pure)
+│   ├── WidgetAppearance.swift # Appearance and Widget Style choices, state tracking
 │   ├── SystemMonitor.swift   # Metrics engine: CPU, RAM, disk, SMC temp/fans,
 │   │                         # network, IPs, battery, GPU, alerts, purge, themes
 │   ├── DiskCleaner.swift     # Disk cleanup engine: 19 categories, scan/clean,
@@ -23,7 +26,9 @@ MacMonitor/
 │   └── Resources/            # Generated app icon: Assets.car, MacMonitor.icns
 ├── design/                   # Icon artwork, Icon Composer document, make-icon.sh
 ├── Tests/
-│   └── WindowSnapperTests.swift  # Snapping tests with real display fixtures
+│   ├── WindowSnapperTests.swift     # Snapping tests with real display fixtures
+│   ├── WidgetChromeTests.swift      # Corner mask against the native corner profile
+│   └── DesktopFocusRuleTests.swift  # Focus rule against logged real clicks
 ├── build.sh                  # Terminal build
 ├── test.sh                   # Builds and runs the unit tests (plain swiftc)
 ├── Install and Run.command   # One-click build and launch
@@ -34,7 +39,8 @@ MacMonitor/
 ## Runtime Topology
 
 - `AppDelegate` owns a single `SystemMonitor` instance shared with `ContentView` (one metrics engine for the widget, the menu bar and the status item).
-- The widget window is a borderless `NSWindow` at desktop icon level + 3 (one step above native desktop widgets) with an `NSVisualEffectView` (hudWindow material) and a rounded mask image. It snaps to the desktop widget grid; see Widget Grid Placement.
+- The widget window is a borderless `NSWindow` at desktop icon level + 3 (one step above native desktop widgets) whose content view is a `WidgetBackgroundView` hosting the SwiftUI root. It snaps to the desktop widget grid and renders light, dark or glass like native widgets; see Widget Grid Placement and Widget Appearance.
+- Launch order matters: the window is placed and every observer (moves, resize requests) is registered before the SwiftUI content is attached. Moving a window onto another display draws it immediately, so content attached earlier appeared and posted its first resize request before the resize observer existed (a detail view opened at launch then stayed at grid height).
 - `SystemMonitor` ticks every 5 seconds on a main run loop timer registered in `.common` modes. Metric reads run on a background utility queue; results are delivered back with `publishOnMain`.
 
 ### publishOnMain (important)
@@ -67,6 +73,18 @@ Native desktop widgets (macOS 14+) live on a grid that MacMonitor cannot join th
 - **Persistence rules**: only user drags write `windowX`/`windowY` (plus `windowOnGrid`). Moves made by macOS (display sleep, wake, rearrangement) are never saved; `didChangeScreenParametersNotification` puts the window back on its saved slot. If the saved display is not connected at launch, the widget shows on the main screen's default slot without overwriting the saved one. Positions saved before grid snapping existed, and the first launch, are snapped once and persisted, so the widget never re-flows on later launches. A drag during a detail view snaps when the view returns to grid size.
 - **Level**: native widgets sit at desktop icon level + 2, MacMonitor at + 3, so a widget dropped onto MacMonitor's slot cannot cover it. macOS offers no way to reserve a slot, so it will still let you drop one there.
 - **Lock Position** (menu, `windowLocked`): turns off `isMovableByWindowBackground`. Previously the whole widget was a drag handle and every tiny move was saved, which is how clicks on the dials drifted the window by a few points; snapping now absorbs such jitter anyway.
+
+## Widget Appearance
+
+The widget matches the native macOS 26 widgets next to it in their two states, full-color and dimmed glass, in Light and Dark. Every value below was measured from screen captures on the target Mac.
+
+- **Menus**: Appearance (`appearanceMode`: `auto`, `light`, `dark`; Automatic follows the system including its day and night switch) and Widget Style (`widgetStyle`: `auto`, `fullColor`, `glass`; mirrors the macOS "Widget style" setting). `WidgetAppearance` persists both, resolves `isGlass` and the window's `NSAppearance`, and calls back so `AppDelegate` updates the window.
+- **Backgrounds** (`WidgetBackgroundView`): full-color is an opaque surface, white in Light (native 1.00 vs ours 1.00) and sRGB 47 in Dark (native widgets read 61 in captures; sRGB 47 reads 61 through the same display pipeline, sRGB 61 read 78). Glass is `NSGlassEffectView` (`.clear`) that follows the window appearance: light glass in Light (0.40 vs native 0.39 over a dark wallpaper), dark glass plus a 45% black shade in Dark (26 to 30 vs native 24 to 27). Tinting the glass only lightened it. Before macOS 26 the HUD material stands in for glass. Hidden layers are removed from rendering.
+- **Content**: colors go through `.primary` and per-state `ThemeColors` (Dark keeps the original palette, Light deepens it for contrast, Glass is white). In Glass the content is forced to the dark scheme so text is white, status and process colors turn white (heavy values stay brighter instead of red, since desaturated red became gray that vanished on light glass), the rest is desaturated, and a soft shadow keeps text legible over bright wallpaper. `AccentButtonChrome` gives the five accent buttons white labels on a tint in Dark and Glass and a tinted label in Light.
+- **Corners**: 27.5pt continuous everywhere (`WidgetChrome.cornerMask`, tested against the measured native corner profile).
+- **Native state rule** (`DesktopFocusRule`, pure and tested with logged clicks): native widgets follow the per-display "desktop revealed" state, not the frontmost app. Two observer runs that sampled a native widget pixel while the user clicked showed: a wallpaper click makes that display's widgets full-color; bringing parked windows back dims them; clicks on MacMonitor, on widgets or on other displays change nothing. No distributed or NSWorkspace notification announces the change.
+- **Tracking** (Automatic style): a global left mouse-down monitor classifies clicks on the widget's display (wallpaper: full-color, app window: dimmed, Dock layer 18: re-check), app activations re-check visible app windows after 0.7s, and launch and display changes read the visible windows. Global monitors never see clicks on MacMonitor itself, which matches native widgets ignoring them. No polling; the monitor needs no permission. Known limit: transitions without a click or activation (a desktop shortcut, Mission Control) can lag until the next click; opening a new window while the desktop is revealed dims MacMonitor while native widgets stay full-color.
+- **Cost**: measured back to back against the previous release under the same conditions, CPU was 1.79 to 1.85% vs 1.96 to 2.02% and memory 80 to 81 MB vs 79 MB; the glass effects measured within noise (1.88% vs 1.80% without them).
 
 ## Metrics Sources
 
@@ -123,7 +141,7 @@ The status item's dropdown mirrors the widget's live metrics (CPU, Memory, Disk,
 ./test.sh    # unit tests
 ```
 
-Both build scripts compile the app (SystemMonitor, DiskCleaner, Components, WindowSnapper, ContentView, MacMonitorApp) with AppKit/SwiftUI/IOKit/ServiceManagement/UserNotifications, then FanHelper separately with IOKit only, and assemble `MacMonitor.app` with both binaries in `Contents/MacOS`. `test.sh` compiles `WindowSnapper.swift` with `Tests/WindowSnapperTests.swift` into a temporary executable (no XCTest) and exits non-zero on any failure.
+Both build scripts compile the app (SystemMonitor, DiskCleaner, Components, WindowSnapper, WidgetChrome, DesktopFocusRule, WidgetAppearance, ContentView, MacMonitorApp) with AppKit/SwiftUI/IOKit/ServiceManagement/UserNotifications, then FanHelper separately with IOKit only, and assemble `MacMonitor.app` with both binaries in `Contents/MacOS`. `test.sh` builds one temporary executable per suite (the code under test plus its test file, no XCTest): WindowSnapper, WidgetChrome and DesktopFocusRule; it exits non-zero on the first failing suite.
 
 ### App Icon
 

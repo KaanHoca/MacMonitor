@@ -12,6 +12,7 @@ A lightweight, native macOS desktop widget that displays real-time system metric
 - **2x2 Instrument Dials** — tick-based gauges for CPU, Memory, Disk and Temperature; ticks shift to orange/red past warning and critical thresholds, and each dial carries its own caption (free disk space, cleanable size, fan RPM)
 - **Live Ring Transitions** — tap a gauge and its ring flies into the detail header, staying live while the detail is open
 - **Native Widget Grid**: the widget is exactly the size of a macOS large widget (344x344) and snaps onto the same desktop grid, so it lines up with system widgets using the standard 16pt spacing; detail views grow it temporarily and it returns to the same slot
+- **Looks Like Native Widgets**: native continuous corners; light and dark appearance (Automatic, Light or Dark); full-color when the desktop is revealed and dimmed Liquid Glass with monochrome content when apps are in front, switching together with the system widgets (Automatic, Full-color or Glass)
 - **Thermals View** — CPU temperature history graph, per-fan cards, RPM history and a fan boost with selectable duration (admin, gentle ramp)
 - **Live Power Consumption**: system, CPU package and DC input wattage, shown in the widget, the menu bar and a dedicated Thermals breakdown with its own history graph
 - **Disk Cleanup** — scan and clean 19 categories of junk files safely; recoverable categories go to the Trash instead of being deleted
@@ -44,7 +45,7 @@ chmod +x build.sh
 open MacMonitor.app
 ```
 
-Run the geometry unit tests (widget grid snapping) with `./test.sh`.
+Run the unit tests (grid snapping, native corner shape, native widget state rule) with `./test.sh`.
 
 ### App Icon
 
@@ -64,6 +65,8 @@ The icon artwork is `design/MacMonitor-logo.png`, wrapped in the Icon Composer d
 | **Quick memory clean** | **Quick** button in Memory detail (no password) |
 | **Deep memory purge** | **Purge** button in Memory detail (admin password) |
 | **Change theme** | Menu bar icon > **Theme** |
+| **Light or dark** | Menu bar icon > **Appearance** (Automatic, Light, Dark) |
+| **Full-color or glass** | Menu bar icon > **Widget Style** (Automatic follows the system widgets) |
 | **Alerts on/off** | Menu bar icon > **Alerts** |
 | **Keep Mac awake** | Menu bar icon > **Keep Mac Awake** |
 | **Text in menu bar** | Menu bar icon > **Stats in Menu Bar** |
@@ -135,6 +138,9 @@ MacMonitor/
 │   ├── ContentView.swift        # Gauge grid, process lists, disk cleanup, thermals
 │   ├── Components.swift         # TickGauge, HistoryGraph, HistoryStore, DetailHeader
 │   ├── WindowSnapper.swift      # Desktop widget grid geometry (pure, unit tested)
+│   ├── WidgetChrome.swift       # Native corner mask and per-state background
+│   ├── DesktopFocusRule.swift   # When native widgets are full-color or dimmed
+│   ├── WidgetAppearance.swift   # Appearance and Widget Style, state tracking
 │   ├── SystemMonitor.swift      # Metrics engine, alerts, purge, themes
 │   ├── DiskCleaner.swift        # Disk cleanup engine (19 categories)
 │   ├── FanHelper.swift          # Admin fan control helper (separate binary)
@@ -145,7 +151,9 @@ MacMonitor/
 │   ├── MacMonitor.icon          # Icon Composer document wrapping the artwork
 │   └── make-icon.sh             # Regenerates the icon resources (needs Xcode 26)
 ├── Tests/
-│   └── WindowSnapperTests.swift # Grid snapping tests with real display fixtures
+│   ├── WindowSnapperTests.swift # Grid snapping tests with real display fixtures
+│   ├── WidgetChromeTests.swift  # Corner mask against the native corner profile
+│   └── DesktopFocusRuleTests.swift # Focus rule against logged real clicks
 ├── build.sh                     # Terminal build script
 ├── test.sh                      # Builds and runs the unit tests
 ├── Install and Run.command      # One-click build & run
