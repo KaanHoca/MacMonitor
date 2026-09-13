@@ -27,32 +27,43 @@ enum WidgetChrome {
     }
 }
 
-/// Background behind the SwiftUI content, one layer per render state:
-/// Full-color Light shows an opaque light surface like native light widgets,
-/// Full-color Dark the dark HUD material (the original look), and Glass
-/// NSGlassEffectView on macOS 26 or the HUD material before it. Hidden
-/// layers are removed from rendering so only one effect runs at a time.
+/// Background behind the SwiftUI content, one layer per render state, each
+/// matched to native macOS 26 widgets from screen captures:
+/// - Full-color: an opaque surface, white in Light and neutral gray in Dark.
+/// - Glass: NSGlassEffectView following the window appearance, plus a dark
+///   shade in Dark; the HUD material before macOS 26.
+/// Hidden layers are removed from rendering so only one effect runs at a time.
 final class WidgetBackgroundView: NSView {
     enum Style { case fullColor, glass }
 
-    /// Native light widgets render on white (sampled from a screen capture).
+    /// Full-color surfaces of native widgets, matched in screen captures:
+    /// native dark widgets read 61 there, and a surface of sRGB 47 reads 61
+    /// through the same display pipeline (sRGB 61 read 78).
     static let lightSurfaceColor = NSColor.white
+    static let darkSurfaceColor = NSColor(srgbRed: 47 / 255, green: 47 / 255, blue: 47 / 255, alpha: 1)
+    /// Dimmed native widgets in Dark are darker than bare dark glass (about
+    /// 27 vs 50 over the same wallpaper); tinting the glass only lightens it,
+    /// so a black shade over the glass closes the gap.
+    static let darkGlassShade = NSColor.black.withAlphaComponent(0.45)
 
     private let content: NSView
     private let surface = NSView()
-    private let material = NSVisualEffectView()
+    private let material = NSVisualEffectView()   // glass fallback before macOS 26
     private var glass: NSView?
+    private let shade = NSView()
     private(set) var style: Style = .fullColor
 
     init(content: NSView) {
         self.content = content
         super.init(frame: .zero)
 
-        surface.wantsLayer = true
-        surface.layer?.backgroundColor = Self.lightSurfaceColor.cgColor
-        surface.layer?.cornerRadius = WidgetChrome.cornerRadius
-        surface.layer?.cornerCurve = .continuous
-        surface.layer?.masksToBounds = true
+        for layerView in [surface, shade] {
+            layerView.wantsLayer = true
+            layerView.layer?.cornerRadius = WidgetChrome.cornerRadius
+            layerView.layer?.cornerCurve = .continuous
+            layerView.layer?.masksToBounds = true
+        }
+        shade.layer?.backgroundColor = Self.darkGlassShade.cgColor
 
         material.material = .hudWindow
         material.blendingMode = .behindWindow
@@ -67,6 +78,7 @@ final class WidgetBackgroundView: NSView {
             glass = glassView
             layers.append(glassView)
         }
+        layers.append(shade)
         for view in layers + [content] {
             view.translatesAutoresizingMaskIntoConstraints = false
             addSubview(view)
@@ -97,10 +109,13 @@ final class WidgetBackgroundView: NSView {
 
     private func updateLayers(animated: Bool) {
         let dark = effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        surface.layer?.backgroundColor = (dark ? Self.darkSurfaceColor : Self.lightSurfaceColor).cgColor
+        let nativeGlass = style == .glass && glass != nil
         let targets: [(NSView?, Bool)] = [
-            (surface, style == .fullColor && !dark),
-            (material, (style == .fullColor && dark) || (style == .glass && glass == nil)),
-            (glass, style == .glass && glass != nil),
+            (surface, style == .fullColor),
+            (material, style == .glass && glass == nil),
+            (glass, nativeGlass),
+            (shade, nativeGlass && dark),
         ]
         for (view, visible) in targets where visible { view?.isHidden = false }
 
