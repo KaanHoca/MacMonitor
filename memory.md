@@ -2,6 +2,17 @@
 
 Bu dosya projede yapılan önemli işlemleri ve alınan kararları özetler. Yeni bir çalışmaya başlamadan önce bu dosyayı ve architecture.md dosyasını kontrol et, işlem sonrası güncelle.
 
+## Son Durum ve Açık Konular (13 Eylül 2026 paydosu)
+
+- **Durum:** Izgaraya yerleşim, uygulama simgesi, açık, koyu ve soluk cam görünüm, özel bulanıklıklı cam ile durum takibi düzeltmesi tamamlandı. Kullanıcı hepsini gözle onayladı. /Applications'daki kopya repodaki derlemeyle aynı, origin/main güncel.
+- **Çalışma düzeni:** Derleme `./build.sh`, testler `./test.sh` (WindowSnapper, WidgetChrome, DesktopFocusRule). Kurulum: uygulamayı kapat, /Applications/MacMonitor.app'i sil, `ditto` ile kopyala, `lsregister -f` ile kaydet, yeniden aç. Push öncesi `git fetch` ve hızlı ileri sarım kontrolü.
+- **Açık konular:**
+  - macOS 13 ile 15 arasındaki cam yedeği (HUD malzemesi) ve özel bulanıklık çağrısı olmayan sistemlerdeki NSGlassEffectView yedeği gerçek cihazda denenmedi.
+  - Tıklamasız geçişlerde (masaüstü kısayolu, Mission Control) durum bir sonraki tıklamaya kadar gecikebiliyor. Masaüstü açıkken yeni pencere açılırsa MacMonitor soluklaşıyor, araç takımları tam renkte kalıyor.
+  - Özel bulanıklık çağrısı ileride bir macOS sürümünde kalkarsa uygulama çökmez, yedeğe düşer. Yeni macOS sürümlerinde soluk camı yeniden ölçmek iyi olur.
+  - Renkler başka bir duvar kağıdında ölçülmedi. Ölçüm doğrusal uyum olduğu için genellenmesi beklenir, gerekirse aynı yöntemle doğrulanmalı.
+- **Ölçüm araçları:** Ölçüm betikleri geçici iş klasöründeydi ve oturumla silinir. Yöntem bu dosyada ve architecture.md'deki "Measuring glass" maddesinde yazılı, gerektiğinde yeniden yazılabilir.
+
 ## Eylül 2026: Soluk Cam İnce Ayarı ve Özel Bulanıklık
 
 - **Kullanıcı geri bildirimi:** Soluk durumda renk sarıya kayıyordu ve duvar kağıdı araç takımlarındaki kadar görünmüyordu. Apple'ın araç takımında duvar kağıdındaki mavi çizgi hafif bulanık ve net seçilirken bizimkinde "neredeyse yok, çok çok bulanık" görünüyordu.
