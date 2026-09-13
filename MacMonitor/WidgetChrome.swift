@@ -41,10 +41,13 @@ final class WidgetBackgroundView: NSView {
     /// through the same display pipeline (sRGB 61 read 78).
     static let lightSurfaceColor = NSColor.white
     static let darkSurfaceColor = NSColor(srgbRed: 47 / 255, green: 47 / 255, blue: 47 / 255, alpha: 1)
-    /// Dimmed native widgets in Dark are darker than bare dark glass (about
-    /// 27 vs 50 over the same wallpaper); tinting the glass only lightens it,
-    /// so a black shade over the glass closes the gap.
-    static let darkGlassShade = NSColor.black.withAlphaComponent(0.45)
+    /// Measured against the bare wallpaper, dimmed native widgets in Dark
+    /// show about 0.3 to 0.4 of it plus a cool offset (13, 20, 27), while bare
+    /// dark glass passes 0.5 to 0.7 plus a neutral offset that read warm. A
+    /// navy shade at 52% matches the native mapping within 3 levels per
+    /// channel (a black one left a yellow cast). Tinting the glass itself only
+    /// lightened it.
+    static let darkGlassShade = NSColor(srgbRed: 0, green: 5 / 255, blue: 12 / 255, alpha: 0.52)
 
     private let content: NSView
     private let surface = NSView()
