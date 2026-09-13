@@ -169,7 +169,7 @@ Decisions that changed while matching the native widgets on screen:
 - **Rule 1** re-checks only for Dock layer 18 windows; the Dock bar and other system windows leave the state unchanged, and Dock clicks that switch apps are covered by rule 2.
 - **Launch order**: the SwiftUI content is attached after the window is placed and the observers are registered (a detail view opened at launch on a secondary display otherwise stayed at grid height).
 - **Dark glass tone**: measured against the bare wallpaper instead of a nearby spot, the black shade left a yellow cast; a navy shade replaced it, and later the custom glass tint.
-- **Custom glass**: `NSGlassEffectView` blurred about three times heavier than dimmed native widgets (sigma 20pt vs 6pt), so thin wallpaper details vanished. Glass is now a private window background blur (radius 20, looked up at runtime) with a tint and a 1pt rim, and no drop shadow; `NSGlassEffectView` remains the fallback when the call is missing.
+- **Custom glass**: `NSGlassEffectView` blurred about three times heavier than dimmed native widgets (sigma 20pt vs 6pt), so thin wallpaper details vanished. Glass is now a private window background blur (radius 20, looked up at runtime) with a tint and a 1pt rim, and no drop shadow; `NSGlassEffectView` remains the fallback when the call is missing. Tint and rim differ per appearance: native rims are dimmer in Light (about 55 above the interior vs 100 in Dark).
 - **Refreshes only dim**: launch, display changes and switching to Automatic dim when an app window is visible and otherwise keep the state, because native widgets stay dimmed on an empty display until a wallpaper click. Tracking runs in every style, and app activations are rechecked at 0.7 and 1.6 seconds.
 
 ## Out of Scope
