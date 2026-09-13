@@ -11,7 +11,7 @@ A lightweight, native macOS desktop widget that displays real-time system metric
 
 - **2x2 Instrument Dials** — tick-based gauges for CPU, Memory, Disk and Temperature; ticks shift to orange/red past warning and critical thresholds, and each dial carries its own caption (free disk space, cleanable size, fan RPM)
 - **Live Ring Transitions** — tap a gauge and its ring flies into the detail header, staying live while the detail is open
-- **Dynamic Window Height** — the widget grows for detail views and shrinks back, bottom edge anchored
+- **Native Widget Grid**: the widget is exactly the size of a macOS large widget (344x344) and snaps onto the same desktop grid, so it lines up with system widgets using the standard 16pt spacing; detail views grow it temporarily and it returns to the same slot
 - **Thermals View** — CPU temperature history graph, per-fan cards, RPM history and a fan boost with selectable duration (admin, gentle ramp)
 - **Live Power Consumption**: system, CPU package and DC input wattage, shown in the widget, the menu bar and a dedicated Thermals breakdown with its own history graph
 - **Disk Cleanup** — scan and clean 19 categories of junk files safely; recoverable categories go to the Trash instead of being deleted
@@ -22,11 +22,12 @@ A lightweight, native macOS desktop widget that displays real-time system metric
 - **Threshold Alerts** — notification when the CPU hits 100°C or the disk is 90% full (max once per hour, toggleable)
 - **Keep Mac Awake** — one-click sleep prevention from the menu bar
 - **Menu Bar Stats** — CPU, Memory, Disk, Temp, Fan, Power, GPU, uptime and load average; optional compact text mode instead of the icon
-- **Widget Rows Menu**: show or hide the power, network speed and IP address rows independently from the menu bar, with the widget height adjusting automatically
+- **Widget Rows Menu**: show or hide the power, network speed and IP address rows independently from the menu bar; the widget keeps its size and re-centers the content
 - **Real Sensors** — SMC temperature keys discovered per chip generation (M1 through M4 and Intel)
 - **Network Monitor** — live download/upload speeds, color-coded ping, tap-to-copy external and local IPs
 - **6 Color Themes** — Ocean, Lavender, Emerald, Sunset, Sakura, Mono; single solid-color rings
-- **Launch at Login, Remembered Position, Desktop-Level Window**
+- **Stable Position**: only your own drags change the saved slot, display sleep or rearrangement never does; optional Lock Position
+- **Launch at Login, Desktop-Level Window**: above desktop icons and native widgets, below app windows
 - **Accessible** — tooltips, VoiceOver labels and Reduce Motion support
 
 ## Quick Start
@@ -43,11 +44,14 @@ chmod +x build.sh
 open MacMonitor.app
 ```
 
+Run the geometry unit tests (widget grid snapping) with `./test.sh`.
+
 ## Usage
 
 | Action | How |
 |---|---|
-| **Move widget** | Drag it anywhere on your desktop |
+| **Move widget** | Drag it anywhere on your desktop; it snaps to the nearest free widget slot |
+| **Lock position** | Menu bar icon > **Lock Position** |
 | **View processes** | Click the **CPU** or **Memory** gauge |
 | **Disk cleanup** | Click the **Disk** gauge to scan and clean junk files |
 | **Thermals and fans** | Click the **Temperature** gauge |
@@ -123,14 +127,18 @@ Typical CPU usage: **~1–2%**
 ```
 MacMonitor/
 ├── MacMonitor/
-│   ├── MacMonitorApp.swift      # App entry, window, menu bar, keep awake, resizing
+│   ├── MacMonitorApp.swift      # App entry, window placement, menu bar, keep awake
 │   ├── ContentView.swift        # Gauge grid, process lists, disk cleanup, thermals
 │   ├── Components.swift         # TickGauge, HistoryGraph, HistoryStore, DetailHeader
+│   ├── WindowSnapper.swift      # Desktop widget grid geometry (pure, unit tested)
 │   ├── SystemMonitor.swift      # Metrics engine, alerts, purge, themes
 │   ├── DiskCleaner.swift        # Disk cleanup engine (19 categories)
 │   ├── FanHelper.swift          # Admin fan control helper (separate binary)
 │   └── Info.plist               # App configuration
+├── Tests/
+│   └── WindowSnapperTests.swift # Grid snapping tests with real display fixtures
 ├── build.sh                     # Terminal build script
+├── test.sh                      # Builds and runs the unit tests
 ├── Install and Run.command      # One-click build & run
 ├── architecture.md              # Technical architecture notes
 └── memory.md                    # Working log and decisions
