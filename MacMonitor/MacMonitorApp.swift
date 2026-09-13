@@ -127,6 +127,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         window.contentView = background
         widgetAppearance.onChange = { [weak self] in self?.applyWidgetAppearance(animated: true) }
         applyWidgetAppearance(animated: false)
+        widgetAppearance.startTracking(window: window)
 
         window.orderFrontRegardless()
     }
