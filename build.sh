@@ -22,6 +22,7 @@ swiftc \
   MacMonitor/SystemMonitor.swift \
   MacMonitor/DiskCleaner.swift \
   MacMonitor/Components.swift \
+  MacMonitor/WindowSnapper.swift \
   MacMonitor/ContentView.swift \
   MacMonitor/MacMonitorApp.swift
 
