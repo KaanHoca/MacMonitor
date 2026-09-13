@@ -83,34 +83,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             defer: false
         )
 
-        // NSVisualEffectView — native macOS widget material
-        let visualEffect = NSVisualEffectView(frame: NSRect(origin: .zero, size: size))
-        visualEffect.material = .hudWindow
-        visualEffect.blendingMode = .behindWindow
-        visualEffect.state = .active
-        visualEffect.appearance = NSAppearance(named: .darkAqua)
-
-        // Native continuous corners via maskImage (no border artifacts)
-        visualEffect.maskImage = WidgetChrome.cornerMask()
-
-        // SwiftUI content — share the same monitor instance
-        let hosting = NSHostingView(rootView: ContentView(monitor: monitor))
-        // AppDelegate owns the window size (fixed widget grid sizes); without
-        // this the SwiftUI content's ideal size silently overrides it.
-        hosting.sizingOptions = []
-        hosting.translatesAutoresizingMaskIntoConstraints = false
-        hosting.wantsLayer = true
-        hosting.layer?.backgroundColor = .clear
-
-        visualEffect.addSubview(hosting)
-        NSLayoutConstraint.activate([
-            hosting.topAnchor.constraint(equalTo: visualEffect.topAnchor),
-            hosting.bottomAnchor.constraint(equalTo: visualEffect.bottomAnchor),
-            hosting.leadingAnchor.constraint(equalTo: visualEffect.leadingAnchor),
-            hosting.trailingAnchor.constraint(equalTo: visualEffect.trailingAnchor),
-        ])
-
-        window.contentView = visualEffect
         window.isOpaque = false
         window.backgroundColor = .clear
         window.hasShadow = true
@@ -137,6 +109,36 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let isDetail = note.userInfo?["isDetail"] as? Bool ?? false
             self?.resizeWindow(to: height, isDetail: isDetail)
         }
+
+        // Content goes in last: moving the window onto another display draws
+        // it right away, and SwiftUI content attached earlier would appear and
+        // post its first resize request before the observer above exists.
+        let visualEffect = NSVisualEffectView(frame: NSRect(origin: .zero, size: size))
+        visualEffect.material = .hudWindow
+        visualEffect.blendingMode = .behindWindow
+        visualEffect.state = .active
+        visualEffect.appearance = NSAppearance(named: .darkAqua)
+
+        // Native continuous corners via maskImage (no border artifacts)
+        visualEffect.maskImage = WidgetChrome.cornerMask()
+
+        // SwiftUI content, sharing the same monitor instance
+        let hosting = NSHostingView(rootView: ContentView(monitor: monitor))
+        // AppDelegate owns the window size (fixed widget grid sizes); without
+        // this the SwiftUI content's ideal size silently overrides it.
+        hosting.sizingOptions = []
+        hosting.translatesAutoresizingMaskIntoConstraints = false
+        hosting.wantsLayer = true
+        hosting.layer?.backgroundColor = .clear
+
+        visualEffect.addSubview(hosting)
+        NSLayoutConstraint.activate([
+            hosting.topAnchor.constraint(equalTo: visualEffect.topAnchor),
+            hosting.bottomAnchor.constraint(equalTo: visualEffect.bottomAnchor),
+            hosting.leadingAnchor.constraint(equalTo: visualEffect.leadingAnchor),
+            hosting.trailingAnchor.constraint(equalTo: visualEffect.trailingAnchor),
+        ])
+        window.contentView = visualEffect
 
         window.orderFrontRegardless()
     }
