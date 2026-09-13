@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 import Darwin
 import IOKit
 import IOKit.ps
@@ -67,6 +68,37 @@ enum AppTheme: String, CaseIterable {
                 temp:   Color.white.opacity(0.58)
             )
         }
+    }
+}
+
+extension AppTheme {
+    /// Theme colors for the current render state. Dark keeps the original
+    /// palette; Light deepens it for contrast on a white surface; Glass is
+    /// monochrome white like dimmed native widgets.
+    func colors(scheme: ColorScheme, glass: Bool) -> ThemeColors {
+        if glass {
+            return ThemeColors(ring: .white.opacity(0.9), accent: .white,
+                               disk: .white.opacity(0.75), temp: .white.opacity(0.82))
+        }
+        guard scheme == .light else { return colors }
+        if self == .mono {
+            return ThemeColors(ring: .black.opacity(0.7), accent: .black.opacity(0.85),
+                               disk: .black.opacity(0.55), temp: .black.opacity(0.62))
+        }
+        let base = colors
+        return ThemeColors(ring: base.ring.deepened, accent: base.accent.deepened,
+                           disk: base.disk.deepened, temp: base.temp.deepened)
+    }
+}
+
+private extension Color {
+    /// Same hue, a bit more saturated and darker: keeps the theme's identity
+    /// while staying readable on a white surface.
+    var deepened: Color {
+        guard let c = NSColor(self).usingColorSpace(.sRGB) else { return self }
+        return Color(hue: Double(c.hueComponent),
+                     saturation: min(Double(c.saturationComponent) * 1.1, 1),
+                     brightness: Double(c.brightnessComponent) * 0.78)
     }
 }
 

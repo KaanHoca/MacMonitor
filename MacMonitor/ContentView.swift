@@ -13,7 +13,9 @@ struct ContentView: View {
     @AppStorage("widgetRow_network") private var showNetworkRow = true
     @AppStorage("widgetRow_ip") private var showIPRow = true
 
-    private var tc: ThemeColors { monitor.theme.colors }
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.widgetGlass) private var widgetGlass
+    private var tc: ThemeColors { monitor.theme.colors(scheme: colorScheme, glass: widgetGlass) }
     private let detailAnimation = Animation.spring(response: 0.32, dampingFraction: 0.86)
 
     var body: some View {
@@ -226,7 +228,7 @@ struct ContentView: View {
                                 tappable: true,
                                 caption: diskCaption,
                                 captionIcon: diskShowsCleanable ? "sparkles" : nil,
-                                captionColor: diskShowsCleanable ? tc.accent.opacity(0.8) : Color.white.opacity(0.35),
+                                captionColor: diskShowsCleanable ? tc.accent.opacity(0.8) : Color.primary.opacity(0.35),
                                 matchID: "ring-disk",
                                 ns: ringNS
                             )
@@ -265,7 +267,7 @@ struct ContentView: View {
 
             // Separator
             Rectangle()
-                .fill(Color.white.opacity(0.06))
+                .fill(Color.primary.opacity(0.06))
                 .frame(height: 1)
                 .padding(.horizontal, 16)
                 .padding(.vertical, UILayout.separatorPadding)
@@ -315,7 +317,7 @@ struct ContentView: View {
                 .foregroundStyle(tc.accent.opacity(0.6))
             Text(String(format: "%.1f W", monitor.systemPowerW))
                 .font(.system(size: 11, weight: .semibold, design: .rounded))
-                .foregroundStyle(.white.opacity(0.75))
+                .foregroundStyle(Color.primary.opacity(0.75))
         }
         .frame(maxWidth: .infinity)
         .padding(.horizontal, 4)
@@ -331,7 +333,7 @@ struct ContentView: View {
                     .foregroundStyle(tc.accent.opacity(0.6))
                 Text(formatSpeed(monitor.downloadSpeed))
                     .font(.system(size: 11, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.75))
+                    .foregroundStyle(Color.primary.opacity(0.75))
             }
             .frame(maxWidth: .infinity)
 
@@ -341,7 +343,7 @@ struct ContentView: View {
                     .foregroundStyle(pingColor(monitor.ping).opacity(0.6))
                 Text(monitor.ping < 0 ? "---" : String(format: "%.0fms", monitor.ping))
                     .font(.system(size: 11, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.75))
+                    .foregroundStyle(Color.primary.opacity(0.75))
             }
             .frame(maxWidth: .infinity)
 
@@ -351,7 +353,7 @@ struct ContentView: View {
                     .foregroundStyle(tc.accent.opacity(0.6))
                 Text(formatSpeed(monitor.uploadSpeed))
                     .font(.system(size: 11, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.75))
+                    .foregroundStyle(Color.primary.opacity(0.75))
             }
             .frame(maxWidth: .infinity)
         }
@@ -382,7 +384,7 @@ struct ContentView: View {
                 .foregroundStyle(tc.accent.opacity(0.6))
             Text(String(format: "%.0f%%", monitor.batteryPercent))
                 .font(.system(size: 10, weight: .semibold, design: .rounded))
-                .foregroundStyle(.white.opacity(0.75))
+                .foregroundStyle(Color.primary.opacity(0.75))
             if monitor.batteryCharging {
                 Image(systemName: "bolt.fill")
                     .font(.system(size: 8))
@@ -398,7 +400,7 @@ struct ContentView: View {
                     Text(String(format: "%.0f%%", monitor.batteryHealth))
                         .font(.system(size: 10, weight: .medium, design: .rounded))
                 }
-                .foregroundStyle(.white.opacity(0.45))
+                .foregroundStyle(Color.primary.opacity(0.45))
                 .help("Battery health relative to design capacity")
             }
             if monitor.batteryCycles > 0 {
@@ -408,7 +410,7 @@ struct ContentView: View {
                     Text(String(format: "%d", monitor.batteryCycles))
                         .font(.system(size: 10, weight: .medium, design: .rounded))
                 }
-                .foregroundStyle(.white.opacity(0.45))
+                .foregroundStyle(Color.primary.opacity(0.45))
                 .help("Battery cycle count")
             }
         }
@@ -479,7 +481,7 @@ struct ContentView: View {
         case 1: return .green
         case 2: return .orange
         case 4: return .red
-        default: return .white
+        default: return .primary
         }
     }
 
@@ -521,7 +523,7 @@ struct ProcessListView: View {
     var infoIcon: String? = nil
     var infoText: String? = nil
     var infoDetail: String? = nil
-    var infoDetailColor: Color = .white
+    var infoDetailColor: Color = .primary
     @State private var actionState: ActionState = .idle
     @State private var actionDetail: String? = nil
     @State private var spinAngle: Double = 0
@@ -548,12 +550,12 @@ struct ProcessListView: View {
                     if let infoIcon = infoIcon {
                         Image(systemName: infoIcon)
                             .font(.system(size: 10))
-                            .foregroundStyle(.white.opacity(0.35))
+                            .foregroundStyle(Color.primary.opacity(0.35))
                     }
                     if let infoText = infoText {
                         Text(infoText)
                             .font(.system(size: 10, weight: .medium, design: .rounded))
-                            .foregroundStyle(.white.opacity(0.6))
+                            .foregroundStyle(Color.primary.opacity(0.6))
                     }
                     Spacer()
                     if let infoDetail = infoDetail {
@@ -562,7 +564,7 @@ struct ProcessListView: View {
                             .frame(width: 6, height: 6)
                         Text(infoDetail)
                             .font(.system(size: 10, weight: .medium, design: .rounded))
-                            .foregroundStyle(.white.opacity(0.6))
+                            .foregroundStyle(Color.primary.opacity(0.6))
                     }
                 }
                 .padding(.leading, 2)
@@ -572,7 +574,7 @@ struct ProcessListView: View {
             // Section label
             Text("TOP PROCESSES")
                 .font(.system(size: 9, weight: .bold))
-                .foregroundStyle(.white.opacity(0.25))
+                .foregroundStyle(Color.primary.opacity(0.25))
                 .padding(.leading, 2)
                 .padding(.bottom, 8)
 
@@ -585,7 +587,7 @@ struct ProcessListView: View {
                         .colorScheme(.dark)
                     Text("Loading...")
                         .font(.system(size: 10))
-                        .foregroundStyle(.white.opacity(0.3))
+                        .foregroundStyle(Color.primary.opacity(0.3))
                 }
                 .frame(maxWidth: .infinity)
                 Spacer()
@@ -612,16 +614,16 @@ struct ProcessListView: View {
             // Rank badge
             Text("\(index + 1)")
                 .font(.system(size: 8, weight: .bold, design: .rounded))
-                .foregroundStyle(.white.opacity(0.4))
+                .foregroundStyle(Color.primary.opacity(0.4))
                 .frame(width: 16, height: 16)
-                .background(Color.white.opacity(0.06))
+                .background(Color.primary.opacity(0.06))
                 .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
                     Text(proc.name)
                         .font(.system(size: 10.5))
-                        .foregroundStyle(.white.opacity(0.8))
+                        .foregroundStyle(Color.primary.opacity(0.8))
                         .lineLimit(1)
                         .truncationMode(.middle)
 
@@ -636,7 +638,7 @@ struct ProcessListView: View {
                 GeometryReader { geo in
                     ZStack(alignment: .leading) {
                         RoundedRectangle(cornerRadius: 2, style: .continuous)
-                            .fill(Color.white.opacity(0.06))
+                            .fill(Color.primary.opacity(0.06))
                             .frame(height: 3)
 
                         RoundedRectangle(cornerRadius: 2, style: .continuous)
@@ -668,10 +670,8 @@ struct ProcessListView: View {
                     switch state {
                     case .idle:
                         Image(systemName: icon)
-                            .foregroundStyle(.white)
                     case .running:
                         Image(systemName: icon)
-                            .foregroundStyle(.white)
                             .rotationEffect(.degrees(spin))
                     case .done:
                         Image(systemName: "checkmark.circle.fill")
@@ -684,12 +684,11 @@ struct ProcessListView: View {
                     // When finished, show the measured result (e.g. "1.2 GB") if available
                     Text(state == .done ? (detail ?? "Done") : label)
                         .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(.white)
                 }
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 6)
-            .background(state == .done ? Color.green.opacity(0.3) : accent.opacity(0.3))
+            .accentButtonChrome(state == .done ? .green : accent)
             .cornerRadius(8)
         }
         .buttonStyle(.plain)
@@ -764,7 +763,7 @@ struct GaugeCell: View {
     var dropBounce: Bool = false
     var caption: String? = nil
     var captionIcon: String? = nil
-    var captionColor: Color = Color.white.opacity(0.35)
+    var captionColor: Color = Color.primary.opacity(0.35)
     let matchID: String
     let ns: Namespace.ID
 
@@ -789,10 +788,10 @@ struct GaugeCell: View {
             VStack(spacing: 1) {
                 Image(systemName: icon)
                     .font(.system(size: 12))
-                    .foregroundStyle(.white.opacity(isHovered && tappable ? 0.8 : 0.5))
+                    .foregroundStyle(Color.primary.opacity(isHovered && tappable ? 0.8 : 0.5))
                 Text(value)
                     .font(.system(size: 15, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.9))
+                    .foregroundStyle(Color.primary.opacity(0.9))
                     .minimumScaleFactor(0.5)
                     .lineLimit(1)
                 if let caption = caption {
@@ -855,13 +854,13 @@ struct CopyableIPCell: View {
                 .foregroundStyle(copied ? .green : accent.opacity(0.5))
             Text(copied ? "Copied!" : ip)
                 .font(.system(size: 10, weight: .medium, design: .monospaced))
-                .foregroundStyle(copied ? .green.opacity(0.8) : .white.opacity(0.55))
+                .foregroundStyle(copied ? .green.opacity(0.8) : Color.primary.opacity(0.55))
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 5)
-        .background(Color.white.opacity(0.04))
+        .background(Color.primary.opacity(0.04))
         .cornerRadius(6)
         .contentShape(Rectangle())
         .scaleEffect(copied ? 1.03 : 1.0)
@@ -931,15 +930,15 @@ struct ThermalsView: View {
                             Text(String(format: "max %.0f°", history.temp.max() ?? 0))
                         }
                         .font(.system(size: 9, design: .rounded))
-                        .foregroundStyle(.white.opacity(0.3))
+                        .foregroundStyle(Color.primary.opacity(0.3))
                     } else if currentTemp <= 0 {
                         HStack(spacing: 6) {
                             Image(systemName: "thermometer.medium.slash")
                                 .font(.system(size: 11))
-                                .foregroundStyle(.white.opacity(0.25))
+                                .foregroundStyle(Color.primary.opacity(0.25))
                             Text("No readable temperature sensor on this Mac.")
                                 .font(.system(size: 10))
-                                .foregroundStyle(.white.opacity(0.35))
+                                .foregroundStyle(Color.primary.opacity(0.35))
                         }
                         .padding(.vertical, 6)
                     }
@@ -961,7 +960,7 @@ struct ThermalsView: View {
                                 Text(String(format: "max %.1f W", history.power.max() ?? 0))
                             }
                             .font(.system(size: 9, design: .rounded))
-                            .foregroundStyle(.white.opacity(0.3))
+                            .foregroundStyle(Color.primary.opacity(0.3))
                         }
                     }
 
@@ -969,10 +968,10 @@ struct ThermalsView: View {
                         HStack(spacing: 6) {
                             Image(systemName: "fan.slash")
                                 .font(.system(size: 11))
-                                .foregroundStyle(.white.opacity(0.25))
+                                .foregroundStyle(Color.primary.opacity(0.25))
                             Text("This Mac is passively cooled (no fans).")
                                 .font(.system(size: 10))
-                                .foregroundStyle(.white.opacity(0.35))
+                                .foregroundStyle(Color.primary.opacity(0.35))
                         }
                         .padding(.top, 4)
                     } else {
@@ -1010,7 +1009,7 @@ struct ThermalsView: View {
     private func sectionLabel(_ title: String) -> some View {
         Text(title)
             .font(.system(size: 9, weight: .bold))
-            .foregroundStyle(.white.opacity(0.25))
+            .foregroundStyle(Color.primary.opacity(0.25))
             .padding(.leading, 2)
     }
 
@@ -1018,10 +1017,10 @@ struct ThermalsView: View {
         VStack(spacing: 2) {
             Text(String(format: "%.1f W", watts))
                 .font(.system(size: 12, weight: .semibold, design: .rounded))
-                .foregroundStyle(.white.opacity(0.85))
+                .foregroundStyle(Color.primary.opacity(0.85))
             Text(label)
                 .font(.system(size: 8, weight: .medium))
-                .foregroundStyle(.white.opacity(0.35))
+                .foregroundStyle(Color.primary.opacity(0.35))
         }
         .frame(maxWidth: .infinity)
     }
@@ -1034,20 +1033,20 @@ struct ThermalsView: View {
                     .foregroundStyle(accent.opacity(0.7))
                 Text("Fan \(fan.id + 1)")
                     .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.7))
+                    .foregroundStyle(Color.primary.opacity(0.7))
 
                 Spacer()
 
                 Text(String(format: "%.0f RPM", fan.actualRPM))
                     .font(.system(size: 12, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.9))
+                    .foregroundStyle(Color.primary.opacity(0.9))
             }
 
             // RPM bar
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
                     RoundedRectangle(cornerRadius: 2)
-                        .fill(Color.white.opacity(0.06))
+                        .fill(Color.primary.opacity(0.06))
                     RoundedRectangle(cornerRadius: 2)
                         .fill(accent.opacity(0.6))
                         .frame(width: max(4, geo.size.width * CGFloat(fan.maxRPM > 0 ? fan.actualRPM / fan.maxRPM : 0)))
@@ -1060,15 +1059,15 @@ struct ThermalsView: View {
             HStack {
                 Text(String(format: "Min: %.0f", fan.minRPM))
                     .font(.system(size: 9, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.3))
+                    .foregroundStyle(Color.primary.opacity(0.3))
                 Spacer()
                 Text(String(format: "Max: %.0f", fan.maxRPM))
                     .font(.system(size: 9, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.3))
+                    .foregroundStyle(Color.primary.opacity(0.3))
             }
         }
         .padding(10)
-        .background(Color.white.opacity(0.03))
+        .background(Color.primary.opacity(0.03))
         .cornerRadius(8)
     }
 
@@ -1105,10 +1104,8 @@ struct ThermalsView: View {
                         switch boostState {
                         case .idle:
                             Image(systemName: "wind")
-                                .foregroundStyle(.white)
                         case .running:
                             Image(systemName: "fan.fill")
-                                .foregroundStyle(.white)
                                 .rotationEffect(.degrees(spinAngle))
                         case .done:
                             Image(systemName: "checkmark.circle.fill")
@@ -1122,11 +1119,10 @@ struct ThermalsView: View {
 
                     Text(boostLabel)
                         .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(.white)
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 6)
-                .background(boostBackground)
+                .accentButtonChrome(boostTint, fillOpacity: boostState == .failed ? 0.2 : 0.3)
                 .cornerRadius(8)
             }
             .buttonStyle(.plain)
@@ -1165,10 +1161,10 @@ struct ThermalsView: View {
                 Text(durationLabel(boostDuration))
                     .font(.system(size: 9, weight: .medium))
             }
-            .foregroundStyle(.white.opacity(0.5))
+            .foregroundStyle(Color.primary.opacity(0.5))
             .padding(.horizontal, 8)
             .padding(.vertical, 5)
-            .background(Color.white.opacity(0.06))
+            .background(Color.primary.opacity(0.06))
             .cornerRadius(6)
         }
         .menuStyle(.borderlessButton)
@@ -1185,10 +1181,10 @@ struct ThermalsView: View {
         return "Boost"
     }
 
-    private var boostBackground: Color {
-        if boostState == .done { return Color.green.opacity(0.3) }
-        if boostState == .failed { return Color.orange.opacity(0.2) }
-        return accent.opacity(0.3)
+    private var boostTint: Color {
+        if boostState == .done { return .green }
+        if boostState == .failed { return .orange }
+        return accent
     }
 }
 
@@ -1231,7 +1227,7 @@ struct DiskCleanupView: View {
                             .foregroundStyle(accent.opacity(0.6))
                         Text(String(format: "R %.1f MB/s", max(readMBs, 0)))
                             .font(.system(size: 10, weight: .semibold, design: .rounded))
-                            .foregroundStyle(.white.opacity(0.65))
+                            .foregroundStyle(Color.primary.opacity(0.65))
                     }
                     HStack(spacing: 4) {
                         Image(systemName: "arrow.up.doc")
@@ -1239,7 +1235,7 @@ struct DiskCleanupView: View {
                             .foregroundStyle(accent.opacity(0.6))
                         Text(String(format: "W %.1f MB/s", max(writeMBs, 0)))
                             .font(.system(size: 10, weight: .semibold, design: .rounded))
-                            .foregroundStyle(.white.opacity(0.65))
+                            .foregroundStyle(Color.primary.opacity(0.65))
                     }
                     Spacer()
                 }
@@ -1299,7 +1295,7 @@ struct DiskCleanupView: View {
 
             Text("Scan your disk to find\ncleanable files.")
                 .font(.system(size: 11))
-                .foregroundStyle(.white.opacity(0.5))
+                .foregroundStyle(Color.primary.opacity(0.5))
                 .multilineTextAlignment(.center)
 
             Button {
@@ -1311,10 +1307,9 @@ struct DiskCleanupView: View {
                     Text("Scan")
                         .font(.system(size: 11, weight: .semibold))
                 }
-                .foregroundStyle(.white)
                 .padding(.horizontal, 20)
                 .padding(.vertical, 7)
-                .background(accent.opacity(0.3))
+                .accentButtonChrome(accent)
                 .cornerRadius(8)
             }
             .buttonStyle(.plain)
@@ -1332,7 +1327,7 @@ struct DiskCleanupView: View {
             // Spinning indicator
             ZStack {
                 Circle()
-                    .stroke(Color.white.opacity(0.08), lineWidth: 4)
+                    .stroke(Color.primary.opacity(0.08), lineWidth: 4)
                     .frame(width: 48, height: 48)
                 Circle()
                     .trim(from: 0, to: cleaner.isScanning ? cleaner.scanProgress : cleaner.cleanProgress)
@@ -1348,7 +1343,7 @@ struct DiskCleanupView: View {
 
             Text(cleaner.isScanning ? "Scanning..." : "Cleaning...")
                 .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.white.opacity(0.6))
+                .foregroundStyle(Color.primary.opacity(0.6))
 
             if cleaner.isCleaning && cleaner.lastCleanedSize > 0 {
                 Text(DiskCleaner.formatSize(cleaner.lastCleanedSize) + " freed")
@@ -1373,16 +1368,16 @@ struct DiskCleanupView: View {
 
             Text(DiskCleaner.formatSize(cleaner.lastCleanedSize))
                 .font(.system(size: 20, weight: .bold, design: .rounded))
-                .foregroundStyle(.white.opacity(0.9))
+                .foregroundStyle(Color.primary.opacity(0.9))
 
             Text("cleaned successfully")
                 .font(.system(size: 11))
-                .foregroundStyle(.white.opacity(0.5))
+                .foregroundStyle(Color.primary.opacity(0.5))
 
             if cleaner.lastTrashedSize > 0 {
                 Text(DiskCleaner.formatSize(cleaner.lastTrashedSize) + " of it is in the Trash, recoverable")
                     .font(.system(size: 9))
-                    .foregroundStyle(.white.opacity(0.35))
+                    .foregroundStyle(Color.primary.opacity(0.35))
             }
 
             Button {
@@ -1390,10 +1385,9 @@ struct DiskCleanupView: View {
             } label: {
                 Text("Done")
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.white)
                     .padding(.horizontal, 24)
                     .padding(.vertical, 7)
-                    .background(accent.opacity(0.3))
+                    .accentButtonChrome(accent)
                     .cornerRadius(8)
             }
             .buttonStyle(.plain)
@@ -1434,7 +1428,7 @@ struct DiskCleanupView: View {
     private func sectionHeader(_ title: String) -> some View {
         Text(title)
             .font(.system(size: 9, weight: .bold))
-            .foregroundStyle(.white.opacity(0.3))
+            .foregroundStyle(Color.primary.opacity(0.3))
             .textCase(.uppercase)
             .padding(.leading, 2)
             .padding(.bottom, 2)
@@ -1452,10 +1446,10 @@ struct DiskCleanupView: View {
                     Text("Reset")
                         .font(.system(size: 9, weight: .medium))
                 }
-                .foregroundStyle(.white.opacity(0.4))
+                .foregroundStyle(Color.primary.opacity(0.4))
                 .padding(.horizontal, 8)
                 .padding(.vertical, 5)
-                .background(Color.white.opacity(0.06))
+                .background(Color.primary.opacity(0.06))
                 .cornerRadius(6)
             }
             .buttonStyle(.plain)
@@ -1470,10 +1464,10 @@ struct DiskCleanupView: View {
                     Text("Rescan")
                         .font(.system(size: 9, weight: .medium))
                 }
-                .foregroundStyle(.white.opacity(0.4))
+                .foregroundStyle(Color.primary.opacity(0.4))
                 .padding(.horizontal, 8)
                 .padding(.vertical, 5)
-                .background(Color.white.opacity(0.06))
+                .background(Color.primary.opacity(0.06))
                 .cornerRadius(6)
             }
             .buttonStyle(.plain)
@@ -1490,10 +1484,10 @@ struct DiskCleanupView: View {
                     Text("Clean")
                         .font(.system(size: 11, weight: .semibold))
                 }
-                .foregroundStyle(.white)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 6)
-                .background(cleaner.totalCleanableSize > 0 ? accent.opacity(0.4) : Color.white.opacity(0.08))
+                .accentButtonChrome(cleaner.totalCleanableSize > 0 ? accent : Color.primary,
+                                    fillOpacity: cleaner.totalCleanableSize > 0 ? 0.4 : 0.08)
                 .cornerRadius(8)
             }
             .buttonStyle(.plain)
@@ -1535,13 +1529,13 @@ struct CategoryRow: View {
                 // Icon
                 Image(systemName: category.icon)
                     .font(.system(size: 10))
-                    .foregroundStyle(isOn ? accent.opacity(0.8) : .white.opacity(0.3))
+                    .foregroundStyle(isOn ? accent.opacity(0.8) : Color.primary.opacity(0.3))
                     .frame(width: 14)
 
                 // Name
                 Text(category.name)
                     .font(.system(size: 10.5))
-                    .foregroundStyle(isOn ? .white.opacity(0.8) : .white.opacity(0.4))
+                    .foregroundStyle(isOn ? Color.primary.opacity(0.8) : Color.primary.opacity(0.4))
                     .lineLimit(1)
 
                 // Info button
@@ -1550,7 +1544,7 @@ struct CategoryRow: View {
                 } label: {
                     Image(systemName: "info.circle")
                         .font(.system(size: 8))
-                        .foregroundStyle(.white.opacity(showInfo ? 0.5 : 0.2))
+                        .foregroundStyle(Color.primary.opacity(showInfo ? 0.5 : 0.2))
                 }
                 .buttonStyle(.plain)
 
@@ -1566,7 +1560,7 @@ struct CategoryRow: View {
                 // Size
                 Text(size > 0 ? DiskCleaner.formatSize(size) : "---")
                     .font(.system(size: 10, weight: .medium, design: .rounded))
-                    .foregroundStyle(size > 1_073_741_824 ? .orange : (size > 104_857_600 ? accent : .white.opacity(0.4)))
+                    .foregroundStyle(size > 1_073_741_824 ? .orange : (size > 104_857_600 ? accent : Color.primary.opacity(0.4)))
                     .frame(width: 52, alignment: .trailing)
             }
 
@@ -1574,7 +1568,7 @@ struct CategoryRow: View {
             if showInfo {
                 Text(category.detail)
                     .font(.system(size: 9))
-                    .foregroundStyle(.white.opacity(0.35))
+                    .foregroundStyle(Color.primary.opacity(0.35))
                     .padding(.leading, 50)
                     .padding(.top, 2)
                     .transition(.opacity.combined(with: .move(edge: .top)))
@@ -1593,11 +1587,11 @@ struct CleanupToggleStyle: ToggleStyle {
     func makeBody(configuration: Configuration) -> some View {
         HStack {
             RoundedRectangle(cornerRadius: 5, style: .continuous)
-                .fill(configuration.isOn ? accent.opacity(0.4) : Color.white.opacity(0.08))
+                .fill(configuration.isOn ? accent.opacity(0.4) : Color.primary.opacity(0.08))
                 .frame(width: 28, height: 16)
                 .overlay(
                     Circle()
-                        .fill(configuration.isOn ? accent : Color.white.opacity(0.4))
+                        .fill(configuration.isOn ? accent : Color.primary.opacity(0.4))
                         .frame(width: 12, height: 12)
                         .offset(x: configuration.isOn ? 6 : -6)
                         .animation(.easeInOut(duration: 0.15), value: configuration.isOn)

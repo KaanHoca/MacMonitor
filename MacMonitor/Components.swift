@@ -81,7 +81,7 @@ struct TickGauge: View, Animatable {
                     let ramp = 0.55 + 0.45 * min(positionInArc, 1)
                     tickColor = activeColor.opacity(ramp * fill + 0.09 * (1 - fill))
                 } else {
-                    tickColor = Color.white.opacity(highlight ? 0.16 : 0.09)
+                    tickColor = Color.primary.opacity(highlight ? 0.16 : 0.09)
                 }
                 context.stroke(path, with: .color(tickColor),
                                style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
@@ -140,7 +140,7 @@ struct HistoryGraph: View {
                         p.move(to: CGPoint(x: 0, y: y))
                         p.addLine(to: CGPoint(x: geo.size.width, y: y))
                     }
-                    .stroke(Color.white.opacity(0.04), lineWidth: 0.5)
+                    .stroke(Color.primary.opacity(0.04), lineWidth: 0.5)
                 }
 
                 let (lo, hi) = bounds()
@@ -165,7 +165,7 @@ struct HistoryGraph: View {
                 }
             }
         }
-        .background(Color.white.opacity(0.02))
+        .background(Color.primary.opacity(0.02))
         .cornerRadius(6)
     }
 
@@ -198,7 +198,7 @@ struct DetailHeader: View {
             Button(action: onBack) {
                 Image(systemName: "chevron.left")
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.6))
+                    .foregroundStyle(Color.primary.opacity(0.6))
                     .frame(width: 28, height: 32)
                     .contentShape(Rectangle())
             }
@@ -210,7 +210,7 @@ struct DetailHeader: View {
 
             Text(title)
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.9))
+                .foregroundStyle(Color.primary.opacity(0.9))
                 .padding(.leading, 2)
 
             Spacer()
@@ -220,5 +220,43 @@ struct DetailHeader: View {
                 .foregroundStyle(color)
         }
         .padding(.bottom, 10)
+    }
+}
+
+// MARK: - Render State
+
+private struct WidgetGlassKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    /// True while the widget renders as glass (native widgets are dimmed).
+    var widgetGlass: Bool {
+        get { self[WidgetGlassKey.self] }
+        set { self[WidgetGlassKey.self] = newValue }
+    }
+}
+
+// MARK: - Accent Button Chrome
+
+/// Label and fill of the accent-tinted buttons. Dark and Glass: white label
+/// on a translucent tint (the original look). Light: tint-colored label on a
+/// lighter tint, because white on a pale fill is unreadable on white.
+struct AccentButtonChrome: ViewModifier {
+    let tint: Color
+    var fillOpacity: Double = 0.3
+    @Environment(\.colorScheme) private var colorScheme
+
+    func body(content: Content) -> some View {
+        let light = colorScheme == .light
+        content
+            .foregroundStyle(light ? tint : Color.white)
+            .background(tint.opacity(light ? fillOpacity * 0.5 : fillOpacity))
+    }
+}
+
+extension View {
+    func accentButtonChrome(_ tint: Color, fillOpacity: Double = 0.3) -> some View {
+        modifier(AccentButtonChrome(tint: tint, fillOpacity: fillOpacity))
     }
 }
