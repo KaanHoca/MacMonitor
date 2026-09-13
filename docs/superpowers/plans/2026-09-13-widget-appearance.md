@@ -970,7 +970,7 @@ In `MacMonitor/MacMonitorApp.swift`:
     private var background: WidgetBackgroundView!
 ```
 
-2. Replace everything from `        // NSVisualEffectView — native macOS widget material` through the `NSLayoutConstraint.activate([...])` block that pins `hosting` to `visualEffect`, and the following `window.contentView = visualEffect` line, with:
+2. The content is attached last in `applicationDidFinishLaunching` (after placement and observer registration, see commit "Attach the widget content only after the window is placed"). Keep the `// Content goes in last: ...` comment and replace everything after it, from `let visualEffect = NSVisualEffectView(...)` through `window.contentView = visualEffect`, with:
 
 ```swift
         // SwiftUI content, sharing the same monitor instance
@@ -985,7 +985,7 @@ In `MacMonitor/MacMonitorApp.swift`:
         window.contentView = background
 ```
 
-3. Right after `observeWindowPlacement()` add:
+3. Right after `window.contentView = background` (before `window.orderFrontRegardless()`) add:
 
 ```swift
         widgetAppearance.onChange = { [weak self] in self?.applyWidgetAppearance(animated: true) }
