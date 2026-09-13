@@ -35,13 +35,29 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var alertsMenuItem: NSMenuItem!
     private var keepAwakeItem: NSMenuItem!
     private var menuBarTextItem: NSMenuItem!
+    private var lockPositionItem: NSMenuItem!
     private var statusTextTimer: Timer?
     private var awakeAssertionID: IOPMAssertionID = 0
 
     // Window geometry bookkeeping for dynamic height
     private var savedGridFrame: NSRect?
-    private var lastSetFrame: NSRect?
+    private var userMovedDuringDetail = false
     private var isProgrammaticResize = false
+
+    // Drag tracking: a mouse-down on the widget marks a possible user drag;
+    // the move is snapped to the widget grid and persisted once the button is
+    // released. Moves made by macOS itself (display changes) are never saved.
+    private var userDragActive = false
+    private var mouseDownCount = 0
+    private var dragEndTimer: Timer?
+    private var mouseMonitor: Any?
+
+    private enum PositionKey {
+        static let x = "windowX"
+        static let y = "windowY"
+        static let onGrid = "windowOnGrid"   // saved origin is a grid slot
+        static let locked = "windowLocked"
+    }
 
     private var menuBarTextEnabled: Bool {
         get { UserDefaults.standard.bool(forKey: "menuBarText") }
@@ -58,13 +74,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         NSApp.setActivationPolicy(.accessory)
         setupStatusBar()
 
-        let d = UserDefaults.standard
-        let size = NSSize(width: UILayout.width, height: UILayout.mainHeight(
-            hasBattery: monitor.batteryPresent,
-            showPower: d.bool(forKey: "powerKeyAvailable") && d.bool(forKey: "widgetRow_power"),
-            showNetwork: d.bool(forKey: "widgetRow_network"),
-            showIP: d.bool(forKey: "widgetRow_ip")
-        ))
+        let size = NSSize(width: UILayout.width, height: UILayout.mainHeight)
 
         window = NSWindow(
             contentRect: NSRect(origin: .zero, size: size),
@@ -85,6 +95,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         // SwiftUI content — share the same monitor instance
         let hosting = NSHostingView(rootView: ContentView(monitor: monitor))
+        // AppDelegate owns the window size (fixed widget grid sizes); without
+        // this the SwiftUI content's ideal size silently overrides it.
+        hosting.sizingOptions = []
         hosting.translatesAutoresizingMaskIntoConstraints = false
         hosting.wantsLayer = true
         hosting.layer?.backgroundColor = .clear
@@ -102,36 +115,17 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         window.backgroundColor = .clear
         window.hasShadow = true
 
-        // Desktop level — app windows float above this
-        window.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.desktopIconWindow)) + 1)
+        // Desktop level, one step above native desktop widgets (they sit at
+        // desktop icon level + 2), so a widget dropped onto MacMonitor's slot
+        // never covers it. Desktop icons stay below, app windows above.
+        window.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.desktopIconWindow)) + 3)
         window.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
-        window.isMovableByWindowBackground = true
+        window.isMovableByWindowBackground = !UserDefaults.standard.bool(forKey: PositionKey.locked)
         window.hidesOnDeactivate = false
         window.isReleasedWhenClosed = false
 
-        // Restore saved position or default to bottom-right
-        if let savedX = UserDefaults.standard.object(forKey: "windowX") as? CGFloat,
-           let savedY = UserDefaults.standard.object(forKey: "windowY") as? CGFloat {
-            window.setFrameOrigin(NSPoint(x: savedX, y: savedY))
-        } else if let screen = NSScreen.main {
-            let x = screen.visibleFrame.maxX - size.width - 16
-            let y = screen.visibleFrame.minY + 16
-            window.setFrameOrigin(NSPoint(x: x, y: y))
-        }
-
-        // Save position whenever the user moves the window. Programmatic
-        // detail-view resizes are skipped so transient origins never leak
-        // into the persisted position.
-        NotificationCenter.default.addObserver(
-            forName: NSWindow.didMoveNotification,
-            object: window,
-            queue: .main
-        ) { [weak self] _ in
-            guard let self = self, !self.isProgrammaticResize else { return }
-            let origin = self.window.frame.origin
-            UserDefaults.standard.set(origin.x, forKey: "windowX")
-            UserDefaults.standard.set(origin.y, forKey: "windowY")
-        }
+        placeWindowAtLaunch()
+        observeWindowPlacement()
 
         // Resize requests from SwiftUI when switching between grid and detail
         NotificationCenter.default.addObserver(
@@ -167,8 +161,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     /// Animates the window to a new height. Entering a detail view saves the
-    /// grid frame; returning restores it exactly (unless the user moved the
-    /// window meanwhile), so the widget never drifts away from its corner.
+    /// grid frame; returning restores it exactly, so the widget never drifts
+    /// away from its slot. If the user moved the window while a detail view
+    /// was open, it lands on the nearest grid slot instead.
     private func resizeWindow(to height: CGFloat, isDetail: Bool) {
         let current = window.frame
         guard current.height != height else { return }
@@ -178,30 +173,222 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             savedGridFrame = current
             target = anchoredFrame(from: current, height: height)
         } else {
-            let userMoved: Bool = {
-                guard let last = lastSetFrame else { return true }
-                return abs(current.origin.x - last.origin.x) > 1 || abs(current.origin.y - last.origin.y) > 1
-            }()
-            if let saved = savedGridFrame, !userMoved {
-                target = anchoredFrame(
-                    from: NSRect(x: saved.origin.x, y: saved.origin.y, width: saved.width, height: saved.height),
-                    height: height
-                )
+            // Only a real drag counts; a move macOS made during the detail
+            // (display change) falls back to the saved grid frame.
+            if let saved = savedGridFrame, !userMovedDuringDetail {
+                target = anchoredFrame(from: saved, height: height)
             } else {
-                target = anchoredFrame(from: current, height: height)
+                target = snappedFrame(for: anchoredFrame(from: current, height: height))
+                persistPosition(target.origin)
             }
             savedGridFrame = nil
+            userMovedDuringDetail = false
         }
 
-        lastSetFrame = target
+        animateWindow(to: target, duration: 0.28)
+    }
+
+    private func animateWindow(to target: NSRect, duration: TimeInterval) {
         isProgrammaticResize = true
+        let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         NSAnimationContext.runAnimationGroup({ ctx in
-            ctx.duration = 0.28
+            ctx.duration = reduceMotion ? 0 : duration
             ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
             self.window.animator().setFrame(target, display: true)
         }, completionHandler: { [weak self] in
             self?.isProgrammaticResize = false
         })
+    }
+
+    /// Moves the window without animation and without treating it as a user move.
+    private func setWindowFrame(_ frame: NSRect) {
+        isProgrammaticResize = true
+        window.setFrame(frame, display: true)
+        isProgrammaticResize = false
+    }
+
+    // MARK: - Window Placement
+
+    /// Restores the saved grid slot. The first launch and positions saved
+    /// before grid snapping existed are snapped once and persisted, so the
+    /// widget never re-flows on later launches.
+    private func placeWindowAtLaunch() {
+        let d = UserDefaults.standard
+        guard let x = d.object(forKey: PositionKey.x) as? CGFloat,
+              let y = d.object(forKey: PositionKey.y) as? CGFloat else {
+            let slot = defaultSlot()
+            setWindowFrame(slot)
+            persistPosition(slot.origin)
+            return
+        }
+
+        let saved = NSRect(origin: NSPoint(x: x, y: y), size: window.frame.size)
+        if screen(containing: saved) == nil {
+            // The saved display is not connected: show the widget on the main
+            // screen but keep the saved slot for when the display returns.
+            setWindowFrame(defaultSlot())
+        } else if d.bool(forKey: PositionKey.onGrid) {
+            setWindowFrame(saved)
+        } else {
+            let slot = snappedFrame(for: saved)
+            setWindowFrame(slot)
+            persistPosition(slot.origin)
+        }
+    }
+
+    private func observeWindowPlacement() {
+        // A mouse-down on the widget marks a possible drag. Local monitors see
+        // only this app's own events, so there is no cost otherwise.
+        mouseMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .leftMouseUp]) { [weak self] event in
+            guard let self = self, event.window === self.window else { return event }
+            if event.type == .leftMouseDown {
+                self.mouseDownCount += 1
+                self.userDragActive = true
+            } else if self.dragEndTimer == nil {
+                // No move seen yet: allow a moment for a late move
+                // notification, then treat the press as a plain click.
+                let press = self.mouseDownCount
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                    guard let self = self, self.mouseDownCount == press, self.dragEndTimer == nil else { return }
+                    self.userDragActive = false
+                }
+            }
+            return event
+        }
+
+        NotificationCenter.default.addObserver(
+            forName: NSWindow.didMoveNotification,
+            object: window,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self = self, !self.isProgrammaticResize, self.userDragActive else { return }
+            self.waitForDragEnd()
+        }
+
+        // Displays sleeping, waking or being rearranged can make macOS move
+        // the window; put it back on its saved slot.
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.didChangeScreenParametersNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.restoreSavedSlot()
+        }
+    }
+
+    /// Polls the mouse button only while a drag is in progress, then snaps.
+    private func waitForDragEnd() {
+        guard dragEndTimer == nil else { return }
+        let timer = Timer(timeInterval: 0.05, repeats: true) { [weak self] timer in
+            guard let self = self else { timer.invalidate(); return }
+            guard NSEvent.pressedMouseButtons & 1 == 0 else { return }
+            timer.invalidate()
+            self.dragEndTimer = nil
+            self.userDragActive = false
+            self.finishUserDrag()
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        dragEndTimer = timer
+    }
+
+    private func finishUserDrag() {
+        // A detail view is taller than the grid slot; it snaps when it
+        // returns to the grid size (see resizeWindow).
+        guard savedGridFrame == nil else {
+            userMovedDuringDetail = true
+            return
+        }
+        let slot = snappedFrame(for: window.frame)
+        persistPosition(slot.origin)
+        animateWindow(to: slot, duration: 0.18)
+    }
+
+    /// Puts the widget back on its saved slot after display changes. Nothing
+    /// is persisted here: only user drags change the saved position.
+    private func restoreSavedSlot() {
+        guard savedGridFrame == nil, dragEndTimer == nil,
+              let x = UserDefaults.standard.object(forKey: PositionKey.x) as? CGFloat,
+              let y = UserDefaults.standard.object(forKey: PositionKey.y) as? CGFloat else { return }
+        let saved = NSRect(origin: NSPoint(x: x, y: y), size: window.frame.size)
+        if screen(containing: saved) != nil {
+            if saved.origin != window.frame.origin { setWindowFrame(saved) }
+        } else if screen(containing: window.frame) == nil {
+            setWindowFrame(defaultSlot())
+        }
+    }
+
+    private func persistPosition(_ origin: NSPoint) {
+        let d = UserDefaults.standard
+        d.set(origin.x, forKey: PositionKey.x)
+        d.set(origin.y, forKey: PositionKey.y)
+        d.set(true, forKey: PositionKey.onGrid)
+    }
+
+    /// Bottom-right slot of the main screen: first launch, or the saved
+    /// display is not connected.
+    private func defaultSlot() -> NSRect {
+        guard let visible = NSScreen.main?.visibleFrame else { return window.frame }
+        let size = NSSize(width: UILayout.width, height: UILayout.mainHeight)
+        let corner = NSRect(
+            x: visible.maxX - size.width - WindowSnapper.gutter,
+            y: visible.minY + WindowSnapper.gutter,
+            width: size.width, height: size.height
+        )
+        return snappedFrame(for: corner)
+    }
+
+    /// Snaps a frame onto the widget grid of the screen it is mostly on.
+    private func snappedFrame(for frame: NSRect) -> NSRect {
+        guard let screen = screen(containing: frame) ?? NSScreen.main else { return frame }
+        return WindowSnapper.snappedFrame(
+            for: frame,
+            screenFrame: screen.frame,
+            visibleFrame: screen.visibleFrame,
+            menuBarHeight: menuBarHeight(),
+            widgetWindows: nativeWidgetWindows()
+        )
+    }
+
+    /// The screen sharing the largest area with the frame, nil when off screen.
+    private func screen(containing frame: NSRect) -> NSScreen? {
+        var best: (screen: NSScreen, area: CGFloat)?
+        for screen in NSScreen.screens {
+            let overlap = screen.frame.intersection(frame)
+            guard !overlap.isNull else { continue }
+            let area = overlap.width * overlap.height
+            if area > 0, area > (best?.area ?? 0) { best = (screen, area) }
+        }
+        return best?.screen
+    }
+
+    /// Menu bar height, read from the primary display: with one shared menu
+    /// bar, other displays report a full-height visible frame.
+    private func menuBarHeight() -> CGFloat {
+        guard let primary = NSScreen.screens.first else { return 0 }
+        return primary.frame.maxY - primary.visibleFrame.maxY
+    }
+
+    /// Frames of native desktop widget windows in Cocoa coordinates. Window
+    /// bounds and owners are readable without Screen Recording permission.
+    private func nativeWidgetWindows() -> [CGRect] {
+        let hostPIDs = Set(NSRunningApplication
+            .runningApplications(withBundleIdentifier: "com.apple.notificationcenterui")
+            .map(\.processIdentifier))
+        guard !hostPIDs.isEmpty,
+              let primaryHeight = NSScreen.screens.first?.frame.height,
+              let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]]
+        else { return [] }
+
+        let normalLevel = Int(CGWindowLevelForKey(.normalWindow))
+        return list.compactMap { entry in
+            guard let pid = entry[kCGWindowOwnerPID as String] as? pid_t, hostPIDs.contains(pid),
+                  let layer = entry[kCGWindowLayer as String] as? Int, layer < normalLevel,
+                  let boundsInfo = entry[kCGWindowBounds as String] as? NSDictionary,
+                  let bounds = CGRect(dictionaryRepresentation: boundsInfo),
+                  bounds.width >= 100, bounds.height >= 100
+            else { return nil }
+            return WindowSnapper.cocoaRect(fromCG: bounds, primaryScreenHeight: primaryHeight)
+        }
     }
 
     /// Creates a stretchable mask image for NSVisualEffectView — clean rounded corners
@@ -297,6 +484,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         rowsMenu.addItem(widgetRowIPItem)
         widgetRowsItem.submenu = rowsMenu
         menu.addItem(widgetRowsItem)
+
+        // Lock Position: turns off dragging so the widget cannot be moved by accident
+        lockPositionItem = NSMenuItem(title: "Lock Position", action: #selector(toggleLockPosition), keyEquivalent: "")
+        lockPositionItem.target = self
+        lockPositionItem.state = UserDefaults.standard.bool(forKey: PositionKey.locked) ? .on : .off
+        menu.addItem(lockPositionItem)
 
         menu.addItem(NSMenuItem.separator())
 
@@ -418,6 +611,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func toggleAlerts() {
         monitor.alertsEnabled.toggle()
         alertsMenuItem.state = monitor.alertsEnabled ? .on : .off
+    }
+
+    @objc private func toggleLockPosition() {
+        let locked = !UserDefaults.standard.bool(forKey: PositionKey.locked)
+        UserDefaults.standard.set(locked, forKey: PositionKey.locked)
+        window.isMovableByWindowBackground = !locked
+        lockPositionItem.state = locked ? .on : .off
     }
 
     @objc private func toggleWidgetRow(_ sender: NSMenuItem) {

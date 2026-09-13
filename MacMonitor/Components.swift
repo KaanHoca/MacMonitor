@@ -3,28 +3,24 @@ import SwiftUI
 // MARK: - Layout Constants
 
 enum UILayout {
-    static let width: CGFloat = 300
+    // The main view is exactly a native macOS large widget (344x344 visible),
+    // so the window shares the desktop widget grid. The size is fixed: hiding
+    // info rows re-centers the content instead of resizing the window.
+    static let width: CGFloat = 344
+    static let mainHeight: CGFloat = 344
     static let detailHeight: CGFloat = 440
 
-    // Grid section: 20 top padding + two 100pt dial rows with 24 spacing
-    // + separator block (1pt line with 12pt vertical padding) + 20 bottom
-    // padding, plus the small slack the original 340pt window carried.
-    static let gridBase: CGFloat = 293
+    // Everything fits the square with all rows visible:
+    // 16 + 100 + 18 + 100 + (10 + 1 + 10) + (14 + 10 + 14 + 10 + 24) + 16 = 343
+    static let gridVerticalPadding: CGFloat = 16
+    static let gridHorizontalPadding: CGFloat = 20
+    static let dialRowSpacing: CGFloat = 18
+    static let separatorPadding: CGFloat = 10
     static let infoRowSpacing: CGFloat = 10
-    static let powerRowHeight: CGFloat = 14
+    // Power and, on portables, battery share one row: four rows would not fit.
+    static let energyRowHeight: CGFloat = 14
     static let networkRowHeight: CGFloat = 14
     static let ipRowHeight: CGFloat = 24
-    static let batteryRowHeight: CGFloat = 14
-
-    static func mainHeight(hasBattery: Bool, showPower: Bool, showNetwork: Bool, showIP: Bool) -> CGFloat {
-        var rows: [CGFloat] = []
-        if showPower { rows.append(powerRowHeight) }
-        if showNetwork { rows.append(networkRowHeight) }
-        if showIP { rows.append(ipRowHeight) }
-        if hasBattery { rows.append(batteryRowHeight) }
-        guard !rows.isEmpty else { return gridBase }
-        return gridBase + rows.reduce(0, +) + CGFloat(rows.count - 1) * infoRowSpacing
-    }
 }
 
 extension Notification.Name {

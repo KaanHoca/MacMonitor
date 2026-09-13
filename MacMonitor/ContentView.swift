@@ -104,18 +104,10 @@ struct ContentView: View {
         .background(Color.clear)
         .onChange(of: detail) { newDetail in
             let isDetail = newDetail != .none
-            let height = isDetail ? UILayout.detailHeight : currentMainHeight
+            let height = isDetail ? UILayout.detailHeight : UILayout.mainHeight
             NotificationCenter.default.post(
                 name: .mmResizeWindow, object: nil,
                 userInfo: ["height": height, "isDetail": isDetail]
-            )
-        }
-        .onChange(of: currentMainHeight) { newHeight in
-            // Row toggles and late power discovery resize the grid live
-            guard detail == .none else { return }
-            NotificationCenter.default.post(
-                name: .mmResizeWindow, object: nil,
-                userInfo: ["height": newHeight, "isDetail": false]
             )
         }
         .onAppear {
@@ -156,19 +148,10 @@ struct ContentView: View {
     // without a readable power key the row never appears.
     private var powerRowVisible: Bool { showPowerRow && monitor.systemPowerW > 0 }
 
-    private var currentMainHeight: CGFloat {
-        UILayout.mainHeight(
-            hasBattery: monitor.batteryPresent,
-            showPower: powerRowVisible,
-            showNetwork: showNetworkRow,
-            showIP: showIPRow
-        )
-    }
-
     var gaugeGrid: some View {
         VStack(spacing: 0) {
             // Two symmetric dial rows; captions live inside the dials
-            VStack(spacing: 24) {
+            VStack(spacing: UILayout.dialRowSpacing) {
                 HStack {
                     gaugeColumn(
                         help: "CPU usage. Click for top processes.",
@@ -285,14 +268,22 @@ struct ContentView: View {
                 .fill(Color.white.opacity(0.06))
                 .frame(height: 1)
                 .padding(.horizontal, 16)
-                .padding(.vertical, 12)
+                .padding(.vertical, UILayout.separatorPadding)
 
             // Info rows below the separator. Each row can be hidden from
             // the menu bar "Widget Rows" submenu; fixed heights keep the
-            // window height math in UILayout.mainHeight exact.
+            // content inside the fixed widget square (see UILayout).
             VStack(spacing: UILayout.infoRowSpacing) {
-                if powerRowVisible {
-                    powerRow.frame(height: UILayout.powerRowHeight)
+                if powerRowVisible || monitor.batteryPresent {
+                    HStack(spacing: 12) {
+                        if powerRowVisible {
+                            // Sharing the row, power keeps its natural width so
+                            // the battery details get the rest without truncating.
+                            if monitor.batteryPresent { powerRow.fixedSize() } else { powerRow }
+                        }
+                        if monitor.batteryPresent { batteryRow }
+                    }
+                    .frame(height: UILayout.energyRowHeight)
                 }
                 if showNetworkRow {
                     networkStatsRow.frame(height: UILayout.networkRowHeight)
@@ -300,12 +291,10 @@ struct ContentView: View {
                 if showIPRow {
                     ipRow.frame(height: UILayout.ipRowHeight)
                 }
-                if monitor.batteryPresent {
-                    batteryRow.frame(height: UILayout.batteryRowHeight)
-                }
             }
         }
-        .padding(20)
+        .padding(.horizontal, UILayout.gridHorizontalPadding)
+        .padding(.vertical, UILayout.gridVerticalPadding)
     }
 
     private var batteryIcon: String {
