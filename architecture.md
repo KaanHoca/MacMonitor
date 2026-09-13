@@ -19,7 +19,9 @@ MacMonitor/
 │   ├── DiskCleaner.swift     # Disk cleanup engine: 19 categories, scan/clean,
 │   │                         # safety allowlist, trash-safe categories
 │   ├── FanHelper.swift       # Separate CLI binary: SMC fan control (run as admin)
-│   └── Info.plist            # LSUIElement app, bundle id com.local.MacMonitor
+│   ├── Info.plist            # LSUIElement app, bundle id com.local.MacMonitor
+│   └── Resources/            # Generated app icon: Assets.car, MacMonitor.icns
+├── design/                   # Icon artwork, Icon Composer document, make-icon.sh
 ├── Tests/
 │   └── WindowSnapperTests.swift  # Snapping tests with real display fixtures
 ├── build.sh                  # Terminal build
@@ -122,6 +124,10 @@ The status item's dropdown mirrors the widget's live metrics (CPU, Memory, Disk,
 ```
 
 Both build scripts compile the app (SystemMonitor, DiskCleaner, Components, WindowSnapper, ContentView, MacMonitorApp) with AppKit/SwiftUI/IOKit/ServiceManagement/UserNotifications, then FanHelper separately with IOKit only, and assemble `MacMonitor.app` with both binaries in `Contents/MacOS`. `test.sh` compiles `WindowSnapper.swift` with `Tests/WindowSnapperTests.swift` into a temporary executable (no XCTest) and exits non-zero on any failure.
+
+### App Icon
+
+macOS 26 shrinks icons that do not fill its squircle onto a gray plate, and older systems never mask icons, so a full-bleed PNG cannot be used as is. `design/MacMonitor.icon` (Icon Composer; the artwork as one full-bleed layer, glass off, solid fill matching the artwork's background) is compiled by `design/make-icon.sh` with `actool` for a macOS 13.0 deployment target. That yields `Assets.car` (the macOS 26 icon plus classic squircle renditions for older systems, selected by `CFBundleIconName`) and a small `MacMonitor.icns` fallback (`CFBundleIconFile`). `actool` ships only with full Xcode, so the outputs live in `MacMonitor/Resources/` and the build scripts just copy them. The Photoshop source (`design/*.psd`) is git-ignored.
 
 Dev hook: `open MacMonitor.app --args -debugDetail cpu|ram|disk|fan` opens a detail view directly (used for UI verification and screenshots).
 

@@ -1,3 +1,5 @@
 .DS_Store
 MacMonitor.app/
 MacMonitor_bin
+# Photoshop design sources stay local; the exported PNG is committed
+design/*.psd

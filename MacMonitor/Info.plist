@@ -6,6 +6,10 @@
     <string>MacMonitor</string>
     <key>CFBundleExecutable</key>
     <string>MacMonitor</string>
+    <key>CFBundleIconFile</key>
+    <string>MacMonitor</string>
+    <key>CFBundleIconName</key>
+    <string>MacMonitor</string>
     <key>CFBundleIdentifier</key>
     <string>com.local.MacMonitor</string>
     <key>CFBundleInfoDictionaryVersion</key>

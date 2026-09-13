@@ -46,6 +46,10 @@ open MacMonitor.app
 
 Run the geometry unit tests (widget grid snapping) with `./test.sh`.
 
+### App Icon
+
+The icon artwork is `design/MacMonitor-logo.png`, wrapped in the Icon Composer document `design/MacMonitor.icon`. After changing either, run `design/make-icon.sh` (needs Xcode 26) to regenerate `MacMonitor/Resources/Assets.car` (the macOS 26 icon plus renditions for older systems) and `MacMonitor.icns` (legacy fallback). The generated files are committed, so building the app never needs Xcode.
+
 ## Usage
 
 | Action | How |
@@ -134,7 +138,12 @@ MacMonitor/
 │   ├── SystemMonitor.swift      # Metrics engine, alerts, purge, themes
 │   ├── DiskCleaner.swift        # Disk cleanup engine (19 categories)
 │   ├── FanHelper.swift          # Admin fan control helper (separate binary)
-│   └── Info.plist               # App configuration
+│   ├── Info.plist               # App configuration
+│   └── Resources/               # Generated app icon (Assets.car, MacMonitor.icns)
+├── design/
+│   ├── MacMonitor-logo.png      # Icon artwork (source of truth)
+│   ├── MacMonitor.icon          # Icon Composer document wrapping the artwork
+│   └── make-icon.sh             # Regenerates the icon resources (needs Xcode 26)
 ├── Tests/
 │   └── WindowSnapperTests.swift # Grid snapping tests with real display fixtures
 ├── build.sh                     # Terminal build script

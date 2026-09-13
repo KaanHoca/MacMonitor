@@ -2,6 +2,15 @@
 
 Bu dosya projede yapılan önemli işlemleri ve alınan kararları özetler. Yeni bir çalışmaya başlamadan önce bu dosyayı ve architecture.md dosyasını kontrol et, işlem sonrası güncelle.
 
+## Eylül 2026: Uygulama Simgesi
+
+- **Kaynak:** Kullanıcının tasarımı design/MacMonitor-logo.png (1024x1024, kare köşeli, saydamlıksız, koyu geçişli arka plan, tik halkası ve çip). PSD kaynağı design/*.psd olarak .gitignore'da, sadece kullanıcının makinesinde duruyor (kullanıcı kararı).
+- **Neden olduğu gibi kullanılmadı:** macOS 26, sistem squircle'ını doldurmayan (kenar pikselleri saydam olan) simgeleri küçültüp gri bir kutuya koyuyor ("simge hapsi"); eski macOS sürümleri ise simgeyi hiç kırpmıyor, kare köşeli PNG keskin kare görünürdü.
+- **Çözüm:** design/MacMonitor.icon (Icon Composer belgesi; PNG tek tam boy katman, cam kapalı, dolgu arka planın orta tonu #222833) actool ile macOS 13.0 hedefine derleniyor. Çıktılar: Assets.car (macOS 26 simgesi ve eski sürümler için klasik squircle kopyaları, CFBundleIconName) ve küçük MacMonitor.icns yedeği (CFBundleIconFile). İkisi de MacMonitor/Resources altında repoda; derleme betikleri sadece kopyalıyor, çünkü actool yalnızca tam Xcode ile geliyor, Command Line Tools'ta yok.
+- **Yeniden üretme:** Tasarım değişince design/make-icon.sh çalıştırılır (Xcode 26 gerekir). PNG tek doğruluk kaynağı; betik onu .icon içine kopyalayıp derliyor.
+- **Doğrulama:** Simge sistemin kendi API'siyle (NSWorkspace, Finder'ın kullandığı) çizdirildi: macOS 26 squircle'ı, standart paylar, cam kenar parlaması, gri kutu yok. Eski sürüm yedeğinin klasik şablonda (kenar payı ve gölge) olduğu da kontrol edildi. Kullanıcının diğer projelerindeki (Pingstat, Syldiret, Sepetly) .icon dosyaları biçim örneği olarak incelendi; katmana "fill" verilirse görsel sadece şekil maskesi olarak renklendiriliyor, tam renkli PNG için fill verilmemeli.
+- **Görüneceği yerler:** Finder, Uygulamalar, Giriş Öğeleri, bildirimler. Dock'ta görünmez (LSUIElement). Menü çubuğu simgesi SF Symbol gösterge olarak kaldı.
+
 ## Eylül 2026: macOS Araç Takımı Izgarasına Uyum ve Konum Kararlılığı
 
 - **Kullanıcının şikayeti:** Widget bazen yer değiştiriyordu, yanına konan macOS araç takımlarıyla (widget) hizalanmıyor, üstüne biniyor ve boyutu "Büyük" araç takımıyla uyuşmuyordu. İçerikten ve tasarım dilinden memnun, sadece ölçü ve yerleşim değişecekti.
