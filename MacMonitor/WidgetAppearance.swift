@@ -57,7 +57,9 @@ final class WidgetAppearance: ObservableObject {
     var onChange: (() -> Void)?
 
     /// Last detected state of the native widgets, used by Automatic style.
-    var nativeDimmed = false
+    /// Starts dimmed: apps are usually in front, and only a wallpaper click
+    /// can prove the desktop is revealed.
+    var nativeDimmed = true
 
     init() {
         let defaults = UserDefaults.standard
@@ -92,12 +94,13 @@ final class WidgetAppearance: ObservableObject {
 
     private weak var trackedWindow: NSWindow?
     private var clickMonitor: Any?
-    private var recheckTimer: Timer?
+    private var recheckTimers: [Timer] = []
 
-    /// Follows the native widgets' state for Automatic style using global
-    /// clicks, app activations and display changes only; no polling. Global
-    /// monitors never see clicks on MacMonitor itself, which matches native
-    /// widgets ignoring them.
+    /// Follows the native widgets' state using global clicks, app
+    /// activations and display changes only; no polling. It keeps tracking in
+    /// the fixed styles too, so switching back to Automatic starts from the
+    /// right state. Global monitors never see clicks on MacMonitor itself,
+    /// which matches native widgets ignoring them.
     func startTracking(window: NSWindow) {
         trackedWindow = window
         clickMonitor = NSEvent.addGlobalMonitorForEvents(matching: .leftMouseDown) { [weak self] _ in
@@ -122,7 +125,7 @@ final class WidgetAppearance: ObservableObject {
     }
 
     private func handleClick(at cocoaPoint: NSPoint) {
-        guard styleMode == .auto, let display = trackedDisplay() else { return }
+        guard let display = trackedDisplay() else { return }
         switch DesktopFocusRule.classifyClick(at: cgPoint(cocoaPoint), display: display, windows: windowSnapshot()) {
         case .fullColor: setNativeDimmed(false)
         case .dimmed: setNativeDimmed(true)
@@ -131,25 +134,33 @@ final class WidgetAppearance: ObservableObject {
         }
     }
 
-    /// Windows slide back or away after the event, so look again shortly after.
+    /// Parked windows slide back over up to about a second after the event,
+    /// so look twice: early for a quick response, later to catch the end.
     private func scheduleRecheck() {
-        guard styleMode == .auto else { return }
-        recheckTimer?.invalidate()
-        let timer = Timer(timeInterval: 0.7, repeats: false) { [weak self] _ in
-            guard let self = self, let display = self.trackedDisplay() else { return }
-            if DesktopFocusRule.appWindowVisible(on: display, windows: self.windowSnapshot()) {
-                self.setNativeDimmed(true)
+        recheckTimers.forEach { $0.invalidate() }
+        recheckTimers = [0.7, 1.6].map { delay in
+            let timer = Timer(timeInterval: delay, repeats: false) { [weak self] _ in
+                self?.dimIfAppWindowVisible()
             }
+            RunLoop.main.add(timer, forMode: .common)
+            return timer
         }
-        RunLoop.main.add(timer, forMode: .common)
-        recheckTimer = timer
     }
 
-    /// Launch, display changes and moving to another display: dimmed when
-    /// an app window is visible on the widget's display.
+    private func dimIfAppWindowVisible() {
+        guard let display = trackedDisplay() else { return }
+        if DesktopFocusRule.appWindowVisible(on: display, windows: windowSnapshot()) {
+            setNativeDimmed(true)
+        }
+    }
+
+    /// Launch, display changes and switching to Automatic.
     func refreshFromVisibleWindows() {
-        guard styleMode == .auto, let display = trackedDisplay() else { return }
-        setNativeDimmed(DesktopFocusRule.appWindowVisible(on: display, windows: windowSnapshot()))
+        guard let display = trackedDisplay() else { return }
+        let visible = DesktopFocusRule.appWindowVisible(on: display, windows: windowSnapshot())
+        if DesktopFocusRule.refresh(appWindowVisible: visible) == .dimmed {
+            setNativeDimmed(true)
+        }
     }
 
     private func setNativeDimmed(_ dimmed: Bool) {

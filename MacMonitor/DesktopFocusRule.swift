@@ -63,6 +63,13 @@ enum DesktopFocusRule {
         }
     }
 
+    /// Launch, display changes and switching to Automatic: an app window on
+    /// the display means dimmed. An empty display says nothing, because
+    /// native widgets stay dimmed there until a wallpaper click reveals it.
+    static func refresh(appWindowVisible: Bool) -> WidgetStateChange {
+        appWindowVisible ? .dimmed : .unchanged
+    }
+
     /// Full-display Dock overlays sit above everything at Dock level but let
     /// clicks through, so they never count as the clicked window.
     private static func isHit(_ window: WindowInfo, at point: CGPoint, display: CGRect) -> Bool {

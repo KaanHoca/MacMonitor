@@ -67,6 +67,11 @@ struct DesktopFocusRuleTests {
         expect("A window on another display does not count",
                DesktopFocusRule.appWindowVisible(on: right, windows: [WindowInfo(owner: .other, layer: 0, bounds: CGRect(x: 100, y: 100, width: 800, height: 600), alpha: 1)]), false)
 
+        expect("A visible app window on a refresh dims",
+               DesktopFocusRule.refresh(appWindowVisible: true), .dimmed)
+        expect("An empty display on a refresh keeps the current state",
+               DesktopFocusRule.refresh(appWindowVisible: false), .unchanged)
+
         print(failures == 0 ? "\nAll tests passed." : "\n\(failures) test(s) failed.")
         exit(failures == 0 ? 0 : 1)
     }
